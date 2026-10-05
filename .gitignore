@@ -426,3 +426,30 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# ---- 業務データ（取引先のデータは絶対にgitに入れない。CLAUDE.md参照）----
+# Work space（実データのフォルダ）
+Work space/
+Work space*/
+
+# 見積書・図面・メール・Excel（実物）
+*.pdf
+*.msg
+*.eml
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+
+# DBファイルと控え
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.bak
+
+# 自動で残すDBの日付つき控え置き場など
+backup/
+backups/
