@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 画面(WinForms)。net48 は Windows 10(1903以降)/11 に標準搭載済みで、会社PCに追加インストールが要らない。 -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>AnkenDesk.App</RootNamespace>
+    <AssemblyName>AnkenDesk</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AnkenDesk.Core\AnkenDesk.Core.csproj" />
+    <ProjectReference Include="..\AnkenDesk.OutlookAccess\AnkenDesk.OutlookAccess.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Outlook COM操作の層。PIA参照なしのレイトバインド(dynamic)で書く。
+       設計の根拠は HANDOFF.md §6 と §8.1（tools/OutlookCheck/ の検証結果）。 -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AnkenDesk.OutlookAccess</RootNamespace>
+    <AssemblyName>AnkenDesk.OutlookAccess</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AnkenDesk.Core\AnkenDesk.Core.csproj" />
+  </ItemGroup>
+
+</Project>

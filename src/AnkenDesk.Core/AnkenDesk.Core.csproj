@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- UI・COMに依存しない業務ロジック。netstandard2.0 なので、net48側(OutlookAccess, App)と
+       net8.0(テスト)の両方から同じdllを参照できる。 -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AnkenDesk.Core</RootNamespace>
+    <AssemblyName>AnkenDesk.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

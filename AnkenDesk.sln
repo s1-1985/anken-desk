@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{5ACFAA2C-6FE5-401F-BFB5-7BE4DBE32011}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnkenDesk.Core", "src\AnkenDesk.Core\AnkenDesk.Core.csproj", "{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnkenDesk.OutlookAccess", "src\AnkenDesk.OutlookAccess\AnkenDesk.OutlookAccess.csproj", "{346C7CDE-04EF-4771-94D3-F6319C93C63C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnkenDesk.App", "src\AnkenDesk.App\AnkenDesk.App.csproj", "{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{599E1B8B-CF5C-4172-AC2F-05C8BAA7A63A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnkenDesk.Core.Tests", "tests\AnkenDesk.Core.Tests\AnkenDesk.Core.Tests.csproj", "{95D070DA-AE7E-46EC-BB78-53EE82DBBC05}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{346C7CDE-04EF-4771-94D3-F6319C93C63C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{346C7CDE-04EF-4771-94D3-F6319C93C63C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{346C7CDE-04EF-4771-94D3-F6319C93C63C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{346C7CDE-04EF-4771-94D3-F6319C93C63C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95D070DA-AE7E-46EC-BB78-53EE82DBBC05}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{95D070DA-AE7E-46EC-BB78-53EE82DBBC05}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{95D070DA-AE7E-46EC-BB78-53EE82DBBC05}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{95D070DA-AE7E-46EC-BB78-53EE82DBBC05}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3C6F3949-E3E2-4AEF-AB04-79ECF6D938B9} = {5ACFAA2C-6FE5-401F-BFB5-7BE4DBE32011}
+		{346C7CDE-04EF-4771-94D3-F6319C93C63C} = {5ACFAA2C-6FE5-401F-BFB5-7BE4DBE32011}
+		{0B8DFB3E-AFCC-4B8E-9EF0-5021A60754CF} = {5ACFAA2C-6FE5-401F-BFB5-7BE4DBE32011}
+		{95D070DA-AE7E-46EC-BB78-53EE82DBBC05} = {599E1B8B-CF5C-4172-AC2F-05C8BAA7A63A}
+	EndGlobalSection
+EndGlobal
