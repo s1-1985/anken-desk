@@ -12,6 +12,7 @@ using System.Threading;
 internal static class Program
 {
     private const int OlMailItem = 0;
+    private const int OlFolderOutbox = 4;
     private const int OlFolderSentMail = 5;
     private const int OlMsg = 3;
 
@@ -87,6 +88,11 @@ internal static class Program
 
             mail.Body = "これはOutlook COM検証ツールの自動テストメールです。\r\n" + marker;
 
+            dynamic ns = app.GetNamespace("MAPI");
+            Log("");
+            Log("[状態] Outlookのオフライン作業: " + DescribeOffline(ns)
+                + "（オフラインだと、送信トレイに入ったまま外へ出ない）");
+
             // [検証4-a] 送信前のEntryID（下書き保存してから取る）
             mail.Save();
             string entryIdBefore = (string)mail.EntryID;
@@ -104,11 +110,15 @@ internal static class Program
             // [検証3] 送信済みアイテムに入るか
             Log("");
             Log("[検証3] 送信済みアイテム");
-            dynamic ns = app.GetNamespace("MAPI");
+            // 送信トレイから出るまで待つ（Send()は送信トレイに入れるだけで、送り出しは非同期）
+            bool leftOutbox = WaitUntilLeftOutbox(ns, subject, 60);
+            Log("  送信トレイから出るまで待った結果: " + (leftOutbox ? "出た" : "60秒たっても残っている"));
             dynamic sent = FindInSent(ns, subject, 30);
             if (sent == null)
             {
-                Log("  NG: 30秒待っても送信済みアイテムに見つからなかった（件名: " + subject + "）");
+                Log("  NG: 送信済みアイテムに見つからなかった（件名: " + subject + "）");
+                Log("  送信トレイに残っているか: " + (OutboxContains(ns, subject) ? "残っている（未送信）" : "残っていない")
+                    + " / オフライン作業: " + DescribeOffline(ns));
             }
             else
             {
@@ -167,6 +177,43 @@ internal static class Program
             Thread.Sleep(2000);
         }
         return null;
+    }
+
+    private static string DescribeOffline(dynamic ns)
+    {
+        try { return (bool)ns.Offline ? "オフライン" : "オンライン"; }
+        catch (Exception ex) { return "取得失敗(" + ex.Message + ")"; }
+    }
+
+    // 送信トレイに件名のメールがあるか（件名は自前で照合する）
+    private static bool OutboxContains(dynamic ns, string subject)
+    {
+        dynamic folder = ns.GetDefaultFolder(OlFolderOutbox);
+        dynamic items = folder.Items;
+        int n = (int)items.Count;
+        for (int i = 1; i <= n; i++)
+        {
+            dynamic item = null;
+            try
+            {
+                item = items[i];
+                if ((string)item.Subject == subject) return true;
+            }
+            catch (Exception) { }
+            finally { if (item != null) { try { Marshal.ReleaseComObject(item); } catch { } } }
+        }
+        return false;
+    }
+
+    private static bool WaitUntilLeftOutbox(dynamic ns, string subject, int timeoutSec)
+    {
+        DateTime limit = DateTime.Now.AddSeconds(timeoutSec);
+        while (DateTime.Now < limit)
+        {
+            if (!OutboxContains(ns, subject)) return true;
+            Thread.Sleep(2000);
+        }
+        return false;
     }
 
     private static string Shorten(string id)

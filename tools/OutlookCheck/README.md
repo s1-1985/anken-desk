@@ -5,7 +5,7 @@ HANDOFF.md §6.2 の検証を会社PCで行う使い捨てのツール。**ビ�
 ## 手順
 1. `build.bat` をダブルクリック（.NET SDK / Visual Studio は不要。Windows標準の csc.exe を使う）
 2. 検証1のため、可能ならOutlookを**終了した状態**にしておく
-3. コマンドプロンプトで `OutlookCheck.exe <自分のメールアドレス>`
+3. コマンドプロンプトで `OutlookCheck.exe` に続けて自分のメールアドレスを入力する。例: `OutlookCheck.exe taro@example.com`（`< >` は打たない。cmd.exeがリダイレクト記号として解釈し「コマンドの構文が誤っています」になる）
 4. 確認画面で `y` を入力すると、テストメールを**実際に送信**する
 
 ## 目視で確認すること（ツールでは判定できない）
