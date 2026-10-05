@@ -453,3 +453,7 @@ Work space*/
 # 自動で残すDBの日付つき控え置き場など
 backup/
 backups/
+
+# 検証ツールの出力・実行ファイル
+tools/OutlookCheck/out/
+tools/OutlookCheck/*.exe
