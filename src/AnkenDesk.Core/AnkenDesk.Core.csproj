@@ -10,7 +10,14 @@
     <AssemblyName>AnkenDesk.Core</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 見積依頼書のテンプレート（現行の「見積依頼」シート）。個人名・納場の名前は取り除いてある。 -->
+    <EmbeddedResource Include="Resources\QuoteRequestTemplate.xlsx" LogicalName="AnkenDesk.Core.QuoteRequestTemplate.xlsx" />
   </ItemGroup>
 
 </Project>
