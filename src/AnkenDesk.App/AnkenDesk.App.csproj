@@ -12,6 +12,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Windows標準のPDF描画エンジン(Windows.Data.Pdf)を net48 から使うための参照アセンブリ。
+         参照のみで、ビルド出力にファイルは増えない（実体はWindows 10以降のOSに含まれる）。PDFsorterと同じ。 -->
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.26100.1742">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\AnkenDesk.Core\AnkenDesk.Core.csproj" />
     <ProjectReference Include="..\AnkenDesk.OutlookAccess\AnkenDesk.OutlookAccess.csproj" />
   </ItemGroup>

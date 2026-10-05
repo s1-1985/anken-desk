@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 2;
+        private const int SchemaVersion = 3;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -401,6 +401,26 @@ namespace AnkenDesk.Core
                             + "PRIMARY KEY (anken_id, supplier_id, pattern_id), "
                             + "FOREIGN KEY (anken_id, supplier_id) REFERENCES anken_supplier(anken_id, supplier_id) ON DELETE CASCADE)");
                         Exec(conn, tx, "PRAGMA user_version = 2");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 3)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        Exec(conn, tx, "CREATE TABLE answer_history ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, anken_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, "
+                            + "version INTEGER NOT NULL, archived_at TEXT NOT NULL, sent_at TEXT, received_at TEXT, "
+                            + "extra_cost TEXT NOT NULL, relaxation TEXT NOT NULL, note TEXT NOT NULL, files TEXT NOT NULL, "
+                            + "UNIQUE (anken_id, supplier_id, version), "
+                            + "FOREIGN KEY (anken_id, supplier_id) REFERENCES anken_supplier(anken_id, supplier_id) ON DELETE CASCADE)");
+                        Exec(conn, tx, "CREATE TABLE quote_history ("
+                            + "history_id INTEGER NOT NULL REFERENCES answer_history(id) ON DELETE CASCADE, "
+                            + "pattern_id INTEGER NOT NULL REFERENCES quantity_pattern(id), "
+                            + "unit_price TEXT, lead_time_days INTEGER, "
+                            + "PRIMARY KEY (history_id, pattern_id))");
+                        Exec(conn, tx, "PRAGMA user_version = 3");
                         tx.Commit();
                     }
                 }

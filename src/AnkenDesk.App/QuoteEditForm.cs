@@ -26,18 +26,50 @@ namespace AnkenDesk.App
         private readonly TextBox _extra = new TextBox();
         private readonly TextBox _relax = new TextBox();
         private readonly TextBox _note = new TextBox();
+        private readonly bool _requote;
+        private readonly CheckBox _keep = new CheckBox();
+        private readonly CheckBox _move = new CheckBox();
+        private readonly Label _newFileLabel = new Label();
 
-        public QuoteEditForm(AppServices services, AnkenSupplier answer, IReadOnlyList<QuantityPattern> patterns, IReadOnlyList<Quote> quotes)
+        /// <summary>入力した回答（調達先ごとの項目）。</summary>
+        public AnkenSupplier Answer
+        {
+            get { return _answer; }
+        }
+
+        /// <summary>入力した、数量パターンごとの単価・リードタイム。出し直しのときは、呼び出し側が保存する。</summary>
+        public List<Quote> ResultQuotes { get; } = new List<Quote>();
+
+        /// <summary>出し直しのとき: 旧版を履歴として残すか（初期値は残す）。</summary>
+        public bool KeepHistory
+        {
+            get { return _keep.Checked; }
+        }
+
+        /// <summary>出し直しのとき: 今ある見積書を旧版フォルダへ移すか。</summary>
+        public bool MoveOldFiles
+        {
+            get { return _move.Checked; }
+        }
+
+        /// <summary>出し直しのとき: 新しい見積書として保存するファイル。選ばなければ null。</summary>
+        public string? NewFilePath { get; private set; }
+
+        /// <param name="requote">true なら「出し直しを受け取る」（旧版の扱いを選べる。DBへの保存は呼び出し側）。</param>
+        /// <param name="currentFiles">出し直しのとき、今ある見積書のファイル名。</param>
+        public QuoteEditForm(AppServices services, AnkenSupplier answer, IReadOnlyList<QuantityPattern> patterns, IReadOnlyList<Quote> quotes,
+            bool requote = false, IReadOnlyList<string>? currentFiles = null)
         {
             _services = services;
             _answer = answer;
+            _requote = requote;
             UiStyle.Apply(this);
-            Text = "回答を入力: " + answer.SupplierName;
+            Text = (requote ? "出し直しを受け取る: " : "回答を入力: ") + answer.SupplierName;
             ClientSize = new Size(760, 640);
 
             Controls.Add(new Label
             {
-                Text = answer.SupplierName + " の回答",
+                Text = answer.SupplierName + (requote ? " の出し直し（新しい回答）" : " の回答"),
                 Font = new Font("BIZ UDPGothic", 14F, FontStyle.Bold),
                 Left = 16, Top = 12, Width = 720, Height = 36,
             });
@@ -52,7 +84,7 @@ namespace AnkenDesk.App
             foreach (var p in patterns)
             {
                 var row = new Row { Pattern = p, Price = new TextBox { Width = 200 }, LeadTime = new TextBox { Width = 180 } };
-                var q = quotes.FirstOrDefault(x => x.PatternId == p.Id && x.SupplierId == answer.SupplierId);
+                var q = requote ? null : quotes.FirstOrDefault(x => x.PatternId == p.Id && x.SupplierId == answer.SupplierId);
                 if (q != null)
                 {
                     row.Price.Text = q.UnitPrice.HasValue ? q.UnitPrice.Value.ToString("0.####", CultureInfo.InvariantCulture) : "";
@@ -75,12 +107,45 @@ namespace AnkenDesk.App
             AddLabeled("備考", _note, 16, y + 210, 720);
 
             if (answer.SentAt.HasValue) { _sent.Value = answer.SentAt.Value; _sent.Checked = true; } else { _sent.Checked = false; }
-            if (answer.ReceivedAt.HasValue) { _received.Value = answer.ReceivedAt.Value; _received.Checked = true; } else { _received.Checked = false; }
-            _extra.Text = answer.ExtraCost;
-            _relax.Text = answer.Relaxation;
-            _note.Text = answer.Note;
+            if (requote)
+            {
+                // 出し直し: 受領日は今日から。別費用・緩和条件・備考は新しい回答として空から入れる（旧版は履歴に残る）。
+                _received.Value = DateTime.Today;
+                _received.Checked = true;
+            }
+            else
+            {
+                if (answer.ReceivedAt.HasValue) { _received.Value = answer.ReceivedAt.Value; _received.Checked = true; } else { _received.Checked = false; }
+                _extra.Text = answer.ExtraCost;
+                _relax.Text = answer.Relaxation;
+                _note.Text = answer.Note;
+            }
 
-            ClientSize = new Size(760, Math.Max(640, y + 210 + 70 + 70));
+            var bottom = y + 210 + 70;
+            if (requote)
+            {
+                var files = currentFiles ?? new List<string>();
+                var ry = bottom + 8;
+                Controls.Add(new Label { Text = "旧版（今の回答）の扱い", Left = 16, Top = ry, Width = 720, Height = 28, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) });
+                _keep.SetBounds(16, ry + 32, 720, 32);
+                _keep.Text = "旧版を履歴として残す（比較表には出ません。「履歴を見る」から開けます）";
+                _keep.Checked = true;
+                _move.SetBounds(16, ry + 66, 720, 32);
+                _move.Text = files.Count == 0
+                    ? "今ある見積書のファイルはありません"
+                    : "今ある見積書 " + files.Count + " 件を、「" + FolderNames.OldVersionFolder + "」フォルダへ移す（削除はしません）";
+                _move.Checked = files.Count > 0;
+                _move.Enabled = files.Count > 0;
+                var pick = UiStyle.CreateButton("新しい見積書を選ぶ...", false, 240);
+                pick.Left = 16; pick.Top = ry + 104;
+                pick.Click += (s, e) => PickNewFile();
+                _newFileLabel.SetBounds(264, ry + 110, 472, 28);
+                _newFileLabel.Text = "（選ばなくても、あとで保存できます）";
+                Controls.AddRange(new Control[] { _keep, _move, pick, _newFileLabel });
+                bottom = ry + 104 + 48;
+            }
+
+            ClientSize = new Size(760, Math.Max(640, bottom + 80));
 
             var save = UiStyle.CreateButton("保存", true, 140);
             save.Left = 458; save.Top = ClientSize.Height - 56;
@@ -101,6 +166,20 @@ namespace AnkenDesk.App
             Controls.Add(new Label { Text = caption, Left = x, Top = y, Width = 440, Height = 24 });
             box.SetBounds(x, y + 28, width, 32);
             Controls.Add(box);
+        }
+
+        private void PickNewFile()
+        {
+            using (var dlg = new OpenFileDialog())
+            {
+                dlg.Title = "新しい見積書を選んでください";
+                dlg.Filter = "見積書（PDF・Excelなど）|*.*";
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    NewFilePath = dlg.FileName;
+                    _newFileLabel.Text = System.IO.Path.GetFileName(dlg.FileName);
+                }
+            }
         }
 
         private void Save()
@@ -144,6 +223,15 @@ namespace AnkenDesk.App
             _answer.ExtraCost = _extra.Text;
             _answer.Relaxation = _relax.Text;
             _answer.Note = _note.Text;
+
+            if (_requote)
+            {
+                // 出し直しは、旧版のPDFの移動とDBの保存を、呼び出し側が順に行う。
+                ResultQuotes.Clear();
+                ResultQuotes.AddRange(quotes);
+                DialogResult = DialogResult.OK;
+                return;
+            }
 
             try
             {

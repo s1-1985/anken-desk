@@ -217,54 +217,59 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var tx = conn.BeginTransaction())
             {
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.Transaction = tx;
-                    cmd.CommandText = "UPDATE anken_supplier SET sent_at = $sent, received_at = $recv, extra_cost = $extra, relaxation = $relax, note = $note "
-                        + "WHERE anken_id = $a AND supplier_id = $s";
-                    cmd.Parameters.AddWithValue("$sent", DateOrNull(answer.SentAt));
-                    cmd.Parameters.AddWithValue("$recv", DateOrNull(answer.ReceivedAt));
-                    cmd.Parameters.AddWithValue("$extra", answer.ExtraCost.Trim());
-                    cmd.Parameters.AddWithValue("$relax", answer.Relaxation.Trim());
-                    cmd.Parameters.AddWithValue("$note", answer.Note.Trim());
-                    cmd.Parameters.AddWithValue("$a", answer.AnkenId);
-                    cmd.Parameters.AddWithValue("$s", answer.SupplierId);
-                    if (cmd.ExecuteNonQuery() == 0)
-                    {
-                        throw new InvalidOperationException("この案件に、その調達先が加えられていません。");
-                    }
-                }
-
-                using (var del = conn.CreateCommand())
-                {
-                    del.Transaction = tx;
-                    del.CommandText = "DELETE FROM quote WHERE anken_id = $a AND supplier_id = $s";
-                    del.Parameters.AddWithValue("$a", answer.AnkenId);
-                    del.Parameters.AddWithValue("$s", answer.SupplierId);
-                    del.ExecuteNonQuery();
-                }
-
-                foreach (var q in quotes)
-                {
-                    if (!q.UnitPrice.HasValue && !q.LeadTimeDays.HasValue)
-                    {
-                        continue;
-                    }
-
-                    using (var ins = conn.CreateCommand())
-                    {
-                        ins.Transaction = tx;
-                        ins.CommandText = "INSERT INTO quote (anken_id, supplier_id, pattern_id, unit_price, lead_time_days) VALUES ($a, $s, $p, $price, $lt)";
-                        ins.Parameters.AddWithValue("$a", answer.AnkenId);
-                        ins.Parameters.AddWithValue("$s", answer.SupplierId);
-                        ins.Parameters.AddWithValue("$p", q.PatternId);
-                        ins.Parameters.AddWithValue("$price", q.UnitPrice.HasValue ? (object)q.UnitPrice.Value.ToString(CultureInfo.InvariantCulture) : DBNull.Value);
-                        ins.Parameters.AddWithValue("$lt", q.LeadTimeDays.HasValue ? (object)q.LeadTimeDays.Value : DBNull.Value);
-                        ins.ExecuteNonQuery();
-                    }
-                }
-
+                WriteAnswer(conn, tx, answer, quotes);
                 tx.Commit();
+            }
+        }
+
+        // 現在の回答（調達先ごとの項目と数量パターンごとの単価）を、渡された内容に置き換える。
+        private static void WriteAnswer(SqliteConnection conn, SqliteTransaction tx, AnkenSupplier answer, IEnumerable<Quote> quotes)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "UPDATE anken_supplier SET sent_at = $sent, received_at = $recv, extra_cost = $extra, relaxation = $relax, note = $note "
+                    + "WHERE anken_id = $a AND supplier_id = $s";
+                cmd.Parameters.AddWithValue("$sent", DateOrNull(answer.SentAt));
+                cmd.Parameters.AddWithValue("$recv", DateOrNull(answer.ReceivedAt));
+                cmd.Parameters.AddWithValue("$extra", answer.ExtraCost.Trim());
+                cmd.Parameters.AddWithValue("$relax", answer.Relaxation.Trim());
+                cmd.Parameters.AddWithValue("$note", answer.Note.Trim());
+                cmd.Parameters.AddWithValue("$a", answer.AnkenId);
+                cmd.Parameters.AddWithValue("$s", answer.SupplierId);
+                if (cmd.ExecuteNonQuery() == 0)
+                {
+                    throw new InvalidOperationException("この案件に、その調達先が加えられていません。");
+                }
+            }
+
+            using (var del = conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM quote WHERE anken_id = $a AND supplier_id = $s";
+                del.Parameters.AddWithValue("$a", answer.AnkenId);
+                del.Parameters.AddWithValue("$s", answer.SupplierId);
+                del.ExecuteNonQuery();
+            }
+
+            foreach (var q in quotes)
+            {
+                if (!q.UnitPrice.HasValue && !q.LeadTimeDays.HasValue)
+                {
+                    continue;
+                }
+
+                using (var ins = conn.CreateCommand())
+                {
+                    ins.Transaction = tx;
+                    ins.CommandText = "INSERT INTO quote (anken_id, supplier_id, pattern_id, unit_price, lead_time_days) VALUES ($a, $s, $p, $price, $lt)";
+                    ins.Parameters.AddWithValue("$a", answer.AnkenId);
+                    ins.Parameters.AddWithValue("$s", answer.SupplierId);
+                    ins.Parameters.AddWithValue("$p", q.PatternId);
+                    ins.Parameters.AddWithValue("$price", q.UnitPrice.HasValue ? (object)q.UnitPrice.Value.ToString(CultureInfo.InvariantCulture) : DBNull.Value);
+                    ins.Parameters.AddWithValue("$lt", q.LeadTimeDays.HasValue ? (object)q.LeadTimeDays.Value : DBNull.Value);
+                    ins.ExecuteNonQuery();
+                }
             }
         }
 

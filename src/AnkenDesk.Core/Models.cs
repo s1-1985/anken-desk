@@ -90,4 +90,25 @@ namespace AnkenDesk.Core
         public decimal? UnitPrice { get; set; }
         public int? LeadTimeDays { get; set; }
     }
+
+    /// <summary>出し直しの前の回答（旧版）。履歴として残したもの。</summary>
+    public sealed class AnswerVersion
+    {
+        public long Id { get; set; }
+        public long AnkenId { get; set; }
+        public long SupplierId { get; set; }
+
+        /// <summary>1から数える。新しい版ほど大きい。</summary>
+        public int Version { get; set; }
+        public DateTime ArchivedAt { get; set; }
+        public DateTime? SentAt { get; set; }
+        public DateTime? ReceivedAt { get; set; }
+        public string ExtraCost { get; set; } = "";
+        public string Relaxation { get; set; } = "";
+        public string Note { get; set; } = "";
+
+        /// <summary>この版の見積書ファイル名（旧版フォルダに移したもの）。改行で区切る。</summary>
+        public string Files { get; set; } = "";
+        public List<Quote> Quotes { get; } = new List<Quote>();
+    }
 }
