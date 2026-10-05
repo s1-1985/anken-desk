@@ -10,10 +10,11 @@ namespace AnkenDesk.App
     /// <summary>案件を登録する（HANDOFF.md §5.4）。フォルダ名と15個のサブフォルダを確認してから、フォルダを作ってDBに保存する。</summary>
     internal sealed class RegisterForm : Form
     {
-        private static readonly string[] BasicItemNames = { "材質", "処理", "荷姿（一次）", "荷姿（二次）", "検査内容" };
-        private static readonly string[] ExtraItemNames = { "工法", "加工", "図面", "帳票", "納期", "SOP", "適用", "納場", "履歴" };
+        private static readonly string[] BasicItemNames = QuoteRequestItems.BasicNames;
+        private static readonly string[] ExtraItemNames = QuoteRequestItems.ExtraNames;
+        private static readonly string[] MultilineItems = { "検査内容", "備考" };
         private static readonly string[] QuantityKinds = { "試作", "量産", "年間見込数" };
-        private static readonly string[] QuantityUnits = { "個", "Lot", "個/年" };
+        private static readonly string[] QuantityUnits = { "個/Lot", "個", "個/年" };
 
         private sealed class QtyRow
         {
@@ -86,7 +87,15 @@ namespace AnkenDesk.App
             _requestDate.Value = DateTime.Today;
             _dueDate.Value = DateTime.Today.AddDays(7);
             LoadClients();
-            AddQuantityRow("試作", 1, "個");
+            AddQuantityRow("試作", 1, "個/Lot");
+            foreach (var kv in _services.Db.GetItemDefaults())
+            {
+                TextBox box;
+                if (_items.TryGetValue(kv.Key, out box))
+                {
+                    box.Text = kv.Value.Replace("\r\n", "\n").Replace("\n", "\r\n");
+                }
+            }
 
             _client.SelectedIndexChanged += (s, e) => UpdatePreview();
             _requestDate.ValueChanged += (s, e) => UpdatePreview();
@@ -156,7 +165,7 @@ namespace AnkenDesk.App
             stack.Controls.Add(_qtyRows);
 
             var add = UiStyle.CreateButton("数量パターンを追加", false, 240);
-            add.Click += (s, e) => AddQuantityRow("試作", 1, "個");
+            add.Click += (s, e) => AddQuantityRow("試作", 1, "個/Lot");
             stack.Controls.Add(add);
 
             p.Controls.Add(stack);
@@ -177,7 +186,7 @@ namespace AnkenDesk.App
             stack.Controls.Add(Header("見積依頼書に載せる項目", 0, 0, true));
             stack.Controls.Add(FieldTable(BasicItemNames));
 
-            var toggle = UiStyle.CreateButton("ほか9項目を入力（工法・加工・図面・帳票・納期・SOP・適用・納場・履歴）", false, 640);
+            var toggle = UiStyle.CreateButton("ほか" + ExtraItemNames.Length + "項目を入力（" + string.Join("・", ExtraItemNames) + "）", false, 640);
             toggle.Click += (s, e) => _extraPanel.Visible = !_extraPanel.Visible;
             stack.Controls.Add(toggle);
 
@@ -206,6 +215,14 @@ namespace AnkenDesk.App
             foreach (var name in names)
             {
                 var tb = new TextBox { Width = 480, Margin = new Padding(0, 4, 0, 4) };
+                if (Array.IndexOf(MultilineItems, name) >= 0)
+                {
+                    tb.Multiline = true;
+                    tb.AcceptsReturn = true;
+                    tb.Height = 64;
+                    tb.ScrollBars = ScrollBars.Vertical;
+                }
+
                 _items[name] = tb;
                 t.Controls.Add(new Label { Text = name, AutoSize = false, Width = 146, Height = 32, TextAlign = ContentAlignment.MiddleLeft });
                 t.Controls.Add(tb);

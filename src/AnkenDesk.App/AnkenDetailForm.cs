@@ -41,13 +41,22 @@ namespace AnkenDesk.App
             ClientSize = new Size(1300, height);
             StartPosition = FormStartPosition.CenterParent;
 
-            _title.SetBounds(16, 10, 900, 44);
+            _title.SetBounds(16, 10, 660, 44);
+            _title.AutoEllipsis = true;
             _title.Font = new Font("BIZ UDPGothic", 18F, FontStyle.Bold);
 
             var open = UiStyle.CreateButton("エクスプローラーで開く", false, 230);
             open.Left = 1054; open.Top = 10;
             open.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             open.Click += (s, e) => OpenFolder();
+            var makeRequest = UiStyle.CreateButton("見積依頼書を作成", true, 190);
+            makeRequest.Left = 856; makeRequest.Top = 10;
+            makeRequest.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            makeRequest.Click += (s, e) => MakeRequestSheet();
+            var editAnken = UiStyle.CreateButton("案件の項目を編集", false, 170);
+            editAnken.Left = 678; editAnken.Top = 10;
+            editAnken.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            editAnken.Click += (s, e) => EditAnken();
 
             // 操作ボタン（1段目: 調達先と回答、2段目: 見積書）
             var add = ToolButton("調達先を加える", true, 16, 60, 150);
@@ -65,17 +74,25 @@ namespace AnkenDesk.App
             var preview = ToolButton("見積書を見る", false, 1024, 60, 150);
             preview.Click += (s, e) => PreviewQuotes();
 
-            _hint.SetBounds(16, 108, 1268, 24);
+            var mailRequest = ToolButton("見積依頼メールを作成", true, 16, 108, 230);
+            mailRequest.Click += (s, e) => OpenMail(MailKind.Request);
+            var mailReminder = ToolButton("催促メールを作成", true, 254, 108, 200);
+            mailReminder.Click += (s, e) => OpenMail(MailKind.Reminder);
+
+            var importMail = ToolButton("受信メールから取り込む", false, 462, 108, 240);
+            importMail.Click += (s, e) => ImportFromMail();
+
+            _hint.SetBounds(16, 156, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
             _hint.Text = "表の調達先の列にファイル（見積書のPDFなど）をドロップすると、「5.調達先見積もり」にコピーして保存します。";
 
-            var band = new Panel { Left = 16, Top = 136, Width = 1268, Height = 80, BackColor = Color.White };
+            var band = new Panel { Left = 16, Top = 184, Width = 1268, Height = 80, BackColor = Color.White };
             Place(band, "得意先・種別", _client, 0, 330);
             Place(band, "依頼日", _requestDate, 330, 180);
             Place(band, "回答期限", _dueDate, 510, 300);
             Place(band, "回答状況", _progress, 810, 450);
 
-            var bodyTop = 228;
+            var bodyTop = 276;
             var historyHeight = 100;
             var bodyHeight = height - bodyTop - historyHeight - 64;
 
@@ -141,7 +158,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.None;
             _history.TabStop = false;
 
-            Controls.AddRange(new Control[] { _title, open, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Activated += (s, e) => Reload();
             Reload();
@@ -343,10 +360,21 @@ namespace AnkenDesk.App
                 }
             }
 
+            // メールの記録（送ったもの・送信トレイに残ったもの・失敗したもの）。
+            var supplierNames = _suppliers.ToDictionary(x => x.SupplierId, x => x.ShortName);
+            foreach (var m in _services.Db.ListMailLog(_ankenId))
+            {
+                string name;
+                var who = m.SupplierId.HasValue && supplierNames.TryGetValue(m.SupplierId.Value, out name) ? name : m.ToAddress;
+                events.Add(new KeyValuePair<DateTime, string>(m.CreatedAt,
+                    MailSender.KindText(m.Kind) + "メール（" + who + "）　" + m.Status + (m.MsgPath != null ? "　.msg保存済み" : "")));
+            }
+
             _history.Items.Clear();
             foreach (var ev in events.OrderBy(x => x.Key))
             {
-                _history.Items.Add(ev.Key.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture) + "　" + ev.Value);
+                var format = ev.Key.TimeOfDay == TimeSpan.Zero ? "yyyy/MM/dd" : "yyyy/MM/dd HH:mm";
+                _history.Items.Add(ev.Key.ToString(format, CultureInfo.InvariantCulture) + "　" + ev.Value);
             }
 
             var pending = _suppliers.Where(s => !s.IsAnswered && s.SentAt.HasValue).ToList();
@@ -620,6 +648,78 @@ namespace AnkenDesk.App
             using (var dlg = new AnswerHistoryForm(s.SupplierName, _services.Db.ListAnswerHistory(_ankenId, s.SupplierId), _services.Db.ListQuantities(_ankenId)))
             {
                 dlg.ShowDialog(this);
+            }
+        }
+
+        // メールで見積依頼／催促を送る。催促は、表で選んだ調達先があればその調達先、無ければ未回答の調達先を初期の選択にする。
+        private void OpenMail(MailKind kind)
+        {
+            if (_suppliers.Count == 0)
+            {
+                MessageBox.Show(this, "この案件に、調達先が加えられていません。先に「調達先を加える」で加えてください。", "メール", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            IReadOnlyCollection<long>? preselect = null;
+            var cell = _grid.CurrentCell;
+            if (cell != null && cell.ColumnIndex > 0)
+            {
+                var chosen = _grid.Columns[cell.ColumnIndex].Tag as AnkenSupplier;
+                if (chosen != null)
+                {
+                    preselect = new[] { chosen.SupplierId };
+                }
+            }
+
+            using (var dlg = new ComposeMailForm(_services, _anken, kind, preselect))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void ImportFromMail()
+        {
+            using (var dlg = new ImportMailForm(_services, _ankenId))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void EditAnken()
+        {
+            using (var dlg = new AnkenEditForm(_services, _ankenId))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        // 見積依頼書（Excel）を、「4.調達先への見積依頼内容」に作る。作ったあと、Excelで開くかを聞く。
+        private void MakeRequestSheet()
+        {
+            string path;
+            try
+            {
+                path = QuoteRequestSheet.SaveToAnkenFolder(AnkenFullPath(), _services.Db.LoadAnkenInput(_ankenId), DateTime.Today);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+            {
+                MessageBox.Show(this, "見積依頼書を作れませんでした。\r\n\r\n" + ex.Message, "見積依頼書を作成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            SetStatus("見積依頼書を作成しました: " + Path.GetFileName(path));
+            Reload();
+            var open = MessageBox.Show(this, "見積依頼書を作成しました。\r\n\r\n" + path + "\r\n\r\nExcelで開きますか？",
+                "見積依頼書を作成", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (open == DialogResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
         }
 

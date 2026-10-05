@@ -155,6 +155,52 @@ namespace AnkenDesk.Core
             return list;
         }
 
+        /// <summary>全案件の調達先と回答状況を、案件のIDごとにまとめて返す（ホームの一覧用）。</summary>
+        public IReadOnlyDictionary<long, IReadOnlyList<AnkenSupplier>> ListAllAnkenSuppliers()
+        {
+            var dict = new Dictionary<long, List<AnkenSupplier>>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT a.anken_id, a.supplier_id, s.name, s.short_name, a.sent_at, a.received_at, a.extra_cost, a.relaxation, a.note "
+                    + "FROM anken_supplier a JOIN supplier s ON s.id = a.supplier_id ORDER BY a.anken_id, s.name";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var ankenId = r.GetInt64(0);
+                        List<AnkenSupplier>? list;
+                        if (!dict.TryGetValue(ankenId, out list))
+                        {
+                            list = new List<AnkenSupplier>();
+                            dict[ankenId] = list;
+                        }
+
+                        list.Add(new AnkenSupplier
+                        {
+                            AnkenId = ankenId,
+                            SupplierId = r.GetInt64(1),
+                            SupplierName = r.GetString(2),
+                            ShortName = r.GetString(3),
+                            SentAt = r.IsDBNull(4) ? (DateTime?)null : ParseDate(r.GetString(4)),
+                            ReceivedAt = r.IsDBNull(5) ? (DateTime?)null : ParseDate(r.GetString(5)),
+                            ExtraCost = r.GetString(6),
+                            Relaxation = r.GetString(7),
+                            Note = r.GetString(8),
+                        });
+                    }
+                }
+            }
+
+            var result = new Dictionary<long, IReadOnlyList<AnkenSupplier>>();
+            foreach (var kv in dict)
+            {
+                result[kv.Key] = kv.Value;
+            }
+
+            return result;
+        }
+
         /// <summary>案件に調達先を加える。既に加えてあれば何もしない。</summary>
         public void AddSupplierToAnken(long ankenId, long supplierId)
         {
