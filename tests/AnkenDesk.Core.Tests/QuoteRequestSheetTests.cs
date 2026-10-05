@@ -135,7 +135,7 @@ namespace AnkenDesk.Core.Tests
                 var ws = Reopen(path, out wb);
                 using (wb)
                 {
-                    Assert.True(ws.LastColumnUsed().ColumnNumber() <= 5);
+                    Assert.True(ws.LastColumnUsed()!.ColumnNumber() <= 5);
                     Assert.True(ws.Cell("B1").IsEmpty());
                     Assert.True(ws.Cell("B2").IsEmpty());
                     Assert.True(ws.Cell("C4").IsEmpty());
@@ -187,6 +187,34 @@ namespace AnkenDesk.Core.Tests
                     var area = ws.PageSetup.PrintAreas.Single().RangeAddress.ToStringRelative();
                     Assert.Equal("B6:E38", area);
                 }
+            }
+        }
+
+        [Fact]
+        public void 案件フォルダの4番に日付つきの名前で保存し同名は連番にする()
+        {
+            using (var dir = new TempDir())
+            {
+                var anken = Path.Combine(dir.Path, "anken");
+                Directory.CreateDirectory(anken);
+
+                var first = QuoteRequestSheet.SaveToAnkenFolder(anken, Input(), new DateTime(2026, 10, 5));
+                var second = QuoteRequestSheet.SaveToAnkenFolder(anken, Input(), new DateTime(2026, 10, 5));
+
+                Assert.Equal(Path.Combine(anken, FolderNames.Subfolders[3], "20261005\u3000見積依頼.xlsx"), first);
+                Assert.EndsWith("20261005\u3000見積依頼 (2).xlsx", second);
+                Assert.True(File.Exists(first));
+                Assert.True(File.Exists(second));
+            }
+        }
+
+        [Fact]
+        public void 案件フォルダが無ければ保存できない()
+        {
+            using (var dir = new TempDir())
+            {
+                Assert.Throws<DirectoryNotFoundException>(() =>
+                    QuoteRequestSheet.SaveToAnkenFolder(Path.Combine(dir.Path, "ない"), Input(), DateTime.Today));
             }
         }
 

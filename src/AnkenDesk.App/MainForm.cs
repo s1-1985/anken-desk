@@ -79,6 +79,7 @@ namespace AnkenDesk.App
                 NavButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)),
                 NavButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)),
                 NavButton("得意先・種別", false, () => new ClientsForm(_services).ShowDialog(this)),
+                NavButton("見積依頼書の既定値", false, () => new ItemDefaultsForm(_services).ShowDialog(this)),
                 NavButton("設定（Work spaceの場所）", false, () => new SettingsForm(_services).ShowDialog(this)),
             };
             var spacer = new Panel { Dock = DockStyle.Top, Height = 16 };

@@ -84,6 +84,24 @@ namespace AnkenDesk.Core
             }
         }
 
+        /// <summary>
+        /// 案件フォルダの「4.調達先への見積依頼内容」に、「YYYYMMDD　見積依頼.xlsx」として保存する。
+        /// 同名があれば連番を付けて、上書きしない。保存したフルパスを返す。
+        /// </summary>
+        public static string SaveToAnkenFolder(string ankenFullPath, AnkenInput input, DateTime date)
+        {
+            if (!Directory.Exists(ankenFullPath))
+            {
+                throw new DirectoryNotFoundException("案件フォルダが見つかりません: " + ankenFullPath);
+            }
+
+            var dir = Path.Combine(ankenFullPath, FolderNames.Subfolders[3]);
+            Directory.CreateDirectory(dir);
+            var path = QuoteFiles.UniquePath(dir, FileName(date));
+            Write(path, input);
+            return path;
+        }
+
         /// <summary>見積依頼書を作る（保存はしない）。</summary>
         public static XLWorkbook Build(AnkenInput input)
         {
@@ -126,7 +144,7 @@ namespace AnkenDesk.Core
                     }
                     else
                     {
-                        ws.Cell(kv.Value, 3).Value = value.Trim();
+                        ws.Cell(kv.Value, 3).Value = value.Trim().Replace("\r\n", "\n");
                     }
                 }
 

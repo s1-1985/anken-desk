@@ -41,13 +41,22 @@ namespace AnkenDesk.App
             ClientSize = new Size(1300, height);
             StartPosition = FormStartPosition.CenterParent;
 
-            _title.SetBounds(16, 10, 900, 44);
+            _title.SetBounds(16, 10, 660, 44);
+            _title.AutoEllipsis = true;
             _title.Font = new Font("BIZ UDPGothic", 18F, FontStyle.Bold);
 
             var open = UiStyle.CreateButton("エクスプローラーで開く", false, 230);
             open.Left = 1054; open.Top = 10;
             open.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             open.Click += (s, e) => OpenFolder();
+            var makeRequest = UiStyle.CreateButton("見積依頼書を作成", true, 190);
+            makeRequest.Left = 856; makeRequest.Top = 10;
+            makeRequest.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            makeRequest.Click += (s, e) => MakeRequestSheet();
+            var editAnken = UiStyle.CreateButton("案件の項目を編集", false, 170);
+            editAnken.Left = 678; editAnken.Top = 10;
+            editAnken.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            editAnken.Click += (s, e) => EditAnken();
 
             // 操作ボタン（1段目: 調達先と回答、2段目: 見積書）
             var add = ToolButton("調達先を加える", true, 16, 60, 150);
@@ -141,7 +150,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.None;
             _history.TabStop = false;
 
-            Controls.AddRange(new Control[] { _title, open, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Activated += (s, e) => Reload();
             Reload();
@@ -620,6 +629,40 @@ namespace AnkenDesk.App
             using (var dlg = new AnswerHistoryForm(s.SupplierName, _services.Db.ListAnswerHistory(_ankenId, s.SupplierId), _services.Db.ListQuantities(_ankenId)))
             {
                 dlg.ShowDialog(this);
+            }
+        }
+
+        private void EditAnken()
+        {
+            using (var dlg = new AnkenEditForm(_services, _ankenId))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        // 見積依頼書（Excel）を、「4.調達先への見積依頼内容」に作る。作ったあと、Excelで開くかを聞く。
+        private void MakeRequestSheet()
+        {
+            string path;
+            try
+            {
+                path = QuoteRequestSheet.SaveToAnkenFolder(AnkenFullPath(), _services.Db.LoadAnkenInput(_ankenId), DateTime.Today);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+            {
+                MessageBox.Show(this, "見積依頼書を作れませんでした。\r\n\r\n" + ex.Message, "見積依頼書を作成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            SetStatus("見積依頼書を作成しました: " + Path.GetFileName(path));
+            Reload();
+            var open = MessageBox.Show(this, "見積依頼書を作成しました。\r\n\r\n" + path + "\r\n\r\nExcelで開きますか？",
+                "見積依頼書を作成", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (open == DialogResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
         }
 
