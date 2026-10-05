@@ -47,7 +47,7 @@ namespace AnkenDesk.Core
                             Id = r.GetInt64(0),
                             AnkenId = ankenId,
                             SupplierId = r.IsDBNull(1) ? (long?)null : r.GetInt64(1),
-                            Kind = r.GetString(2) == "催促" ? MailKind.Reminder : MailKind.Request,
+                            Kind = r.GetString(2) == "催促" ? MailKind.Reminder : (r.GetString(2) == "回答" ? MailKind.Answer : MailKind.Request),
                             ToAddress = r.GetString(3),
                             Subject = r.GetString(4),
                             Status = r.GetString(5),
@@ -70,6 +70,20 @@ namespace AnkenDesk.Core
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "UPDATE anken_supplier SET sent_at = $d WHERE anken_id = $a AND supplier_id = $s";
+                cmd.Parameters.AddWithValue("$d", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                cmd.Parameters.AddWithValue("$a", ankenId);
+                cmd.Parameters.AddWithValue("$s", supplierId);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>調達先から回答（見積書）を受け取ったので、「回答受領日」を入れる。</summary>
+        public void MarkAnswerReceived(long ankenId, long supplierId, DateTime date)
+        {
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE anken_supplier SET received_at = $d WHERE anken_id = $a AND supplier_id = $s";
                 cmd.Parameters.AddWithValue("$d", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 cmd.Parameters.AddWithValue("$a", ankenId);
                 cmd.Parameters.AddWithValue("$s", supplierId);

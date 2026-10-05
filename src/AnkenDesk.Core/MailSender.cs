@@ -129,7 +129,15 @@ namespace AnkenDesk.Core
 
         public static string KindText(MailKind kind)
         {
-            return kind == MailKind.Request ? "依頼" : "催促";
+            switch (kind)
+            {
+                case MailKind.Reminder:
+                    return "催促";
+                case MailKind.Answer:
+                    return "回答";
+                default:
+                    return "依頼";
+            }
         }
     }
 }

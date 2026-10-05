@@ -77,6 +77,7 @@ namespace AnkenDesk.App
             {
                 NavButton("ホーム（要対応）", true, null),
                 NavButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)),
+                NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
                 NavButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)),
                 NavButton("得意先・種別", false, () => new ClientsForm(_services).ShowDialog(this)),
                 NavButton("見積依頼書の既定値", false, () => new ItemDefaultsForm(_services).ShowDialog(this)),

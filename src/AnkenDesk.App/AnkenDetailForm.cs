@@ -79,6 +79,9 @@ namespace AnkenDesk.App
             var mailReminder = ToolButton("催促メールを作成", true, 254, 108, 200);
             mailReminder.Click += (s, e) => OpenMail(MailKind.Reminder);
 
+            var importMail = ToolButton("受信メールから取り込む", false, 462, 108, 240);
+            importMail.Click += (s, e) => ImportFromMail();
+
             _hint.SetBounds(16, 156, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
             _hint.Text = "表の調達先の列にファイル（見積書のPDFなど）をドロップすると、「5.調達先見積もり」にコピーして保存します。";
@@ -155,7 +158,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.None;
             _history.TabStop = false;
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Activated += (s, e) => Reload();
             Reload();
@@ -669,6 +672,16 @@ namespace AnkenDesk.App
             }
 
             using (var dlg = new ComposeMailForm(_services, _anken, kind, preselect))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void ImportFromMail()
+        {
+            using (var dlg = new ImportMailForm(_services, _ankenId))
             {
                 dlg.ShowDialog(this);
             }

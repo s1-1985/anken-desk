@@ -10,6 +10,9 @@ namespace AnkenDesk.Core
 
         /// <summary>催促（未回答の調達先へ）。</summary>
         Reminder,
+
+        /// <summary>調達先から届いた回答（受信メールの取り込み）。</summary>
+        Answer,
     }
 
     /// <summary>送るメール1通。調達先ごとに別々のメールにする（調達先同士のアドレスを見せない。HANDOFF.md §3.4）。</summary>
