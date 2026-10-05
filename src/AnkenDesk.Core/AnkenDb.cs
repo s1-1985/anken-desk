@@ -7,9 +7,9 @@ using Microsoft.Data.Sqlite;
 namespace AnkenDesk.Core
 {
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
-    public sealed class AnkenDb : IDisposable
+    public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 1;
+        private const int SchemaVersion = 2;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -288,7 +288,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT kind, quantity, unit FROM quantity_pattern WHERE anken_id = $a ORDER BY seq";
+                cmd.CommandText = "SELECT kind, quantity, unit, id FROM quantity_pattern WHERE anken_id = $a ORDER BY seq";
                 cmd.Parameters.AddWithValue("$a", ankenId);
                 using (var r = cmd.ExecuteReader())
                 {
@@ -299,6 +299,7 @@ namespace AnkenDesk.Core
                             Kind = r.GetString(0),
                             Quantity = decimal.Parse(r.GetString(1), CultureInfo.InvariantCulture),
                             Unit = r.GetString(2),
+                            Id = r.GetInt64(3),
                         });
                     }
                 }
@@ -377,6 +378,29 @@ namespace AnkenDesk.Core
                             + "anken_id INTEGER NOT NULL REFERENCES anken(id), name TEXT NOT NULL, value TEXT NOT NULL, "
                             + "PRIMARY KEY (anken_id, name))");
                         Exec(conn, tx, "PRAGMA user_version = 1");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 2)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        Exec(conn, tx, "CREATE TABLE supplier ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, short_name TEXT NOT NULL, "
+                            + "email TEXT NOT NULL, address TEXT NOT NULL)");
+                        Exec(conn, tx, "CREATE TABLE anken_supplier ("
+                            + "anken_id INTEGER NOT NULL REFERENCES anken(id), supplier_id INTEGER NOT NULL REFERENCES supplier(id), "
+                            + "sent_at TEXT, received_at TEXT, "
+                            + "extra_cost TEXT NOT NULL DEFAULT '', relaxation TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', "
+                            + "PRIMARY KEY (anken_id, supplier_id))");
+                        Exec(conn, tx, "CREATE TABLE quote ("
+                            + "anken_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, "
+                            + "pattern_id INTEGER NOT NULL REFERENCES quantity_pattern(id), "
+                            + "unit_price TEXT, lead_time_days INTEGER, "
+                            + "PRIMARY KEY (anken_id, supplier_id, pattern_id), "
+                            + "FOREIGN KEY (anken_id, supplier_id) REFERENCES anken_supplier(anken_id, supplier_id) ON DELETE CASCADE)");
+                        Exec(conn, tx, "PRAGMA user_version = 2");
                         tx.Commit();
                     }
                 }

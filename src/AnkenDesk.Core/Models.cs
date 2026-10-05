@@ -13,6 +13,8 @@ namespace AnkenDesk.Core
     /// <summary>見積を取る数量の1行。種別は「試作」「量産」「年間見込数」など、単位は「個」「Lot」「個/年」など。</summary>
     public sealed class QuantityPattern
     {
+        /// <summary>DBのID。登録前は0。</summary>
+        public long Id { get; set; }
         public string Kind { get; set; } = "";
         public decimal Quantity { get; set; }
         public string Unit { get; set; } = "";
@@ -47,5 +49,45 @@ namespace AnkenDesk.Core
 
         /// <summary>Work spaceからの相対パス（得意先・種別のフォルダ名\案件フォルダ名）。</summary>
         public string FolderPath { get; set; } = "";
+    }
+
+    /// <summary>調達先（マスター）。略称は見積書PDFのファイル名に使う。</summary>
+    public sealed class Supplier
+    {
+        public long Id { get; set; }
+        public string Name { get; set; } = "";
+        public string ShortName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Address { get; set; } = "";
+    }
+
+    /// <summary>案件に対して見積を依頼した調達先と、その回答のうち調達先ごとに1つの項目。</summary>
+    public sealed class AnkenSupplier
+    {
+        public long AnkenId { get; set; }
+        public long SupplierId { get; set; }
+        public string SupplierName { get; set; } = "";
+        public string ShortName { get; set; } = "";
+        public DateTime? SentAt { get; set; }
+        public DateTime? ReceivedAt { get; set; }
+
+        /// <summary>別費用（型・治具など）。仮置き（HANDOFF.md §8 #7）。</summary>
+        public string ExtraCost { get; set; } = "";
+        public string Relaxation { get; set; } = "";
+        public string Note { get; set; } = "";
+
+        public bool IsAnswered
+        {
+            get { return ReceivedAt.HasValue; }
+        }
+    }
+
+    /// <summary>調達先の回答のうち、数量パターンごとの単価とリードタイム。</summary>
+    public sealed class Quote
+    {
+        public long SupplierId { get; set; }
+        public long PatternId { get; set; }
+        public decimal? UnitPrice { get; set; }
+        public int? LeadTimeDays { get; set; }
     }
 }

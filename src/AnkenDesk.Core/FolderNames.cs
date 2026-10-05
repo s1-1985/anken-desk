@@ -29,6 +29,9 @@ namespace AnkenDesk.Core
             "15.その他資料・レター",
         };
 
+        /// <summary>旧版の見積書PDFを移す先（「5.調達先見積もり」の中）。仮置き（HANDOFF.md §8 #6）。</summary>
+        public const string OldVersionFolder = "_旧版";
+
         /// <summary>「YYYYMMDD　品番」、備考があれば「YYYYMMDD　品番　備考」。区切りは全角スペース1つ。</summary>
         public static string BuildAnkenFolderName(DateTime requestDate, string partNumber, string? note)
         {

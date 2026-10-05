@@ -15,7 +15,7 @@ namespace AnkenDesk.App
             _services = services;
             UiStyle.Apply(this);
             Text = AppInfo.Title;
-            ClientSize = new Size(640, 520);
+            ClientSize = new Size(640, 580);
             StartPosition = FormStartPosition.CenterScreen;
 
             var title = new Label
@@ -45,6 +45,7 @@ namespace AnkenDesk.App
             panel.Controls.Add(MenuButton("案件を登録", true, () => new RegisterForm(_services).ShowDialog(this)));
             panel.Controls.Add(MenuButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)));
             panel.Controls.Add(MenuButton("得意先・種別の管理", false, () => new ClientsForm(_services).ShowDialog(this)));
+            panel.Controls.Add(MenuButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)));
             panel.Controls.Add(MenuButton("設定（Work spaceの場所）", false, () => new SettingsForm(_services).ShowDialog(this)));
             panel.Controls.Add(MenuButton("閉じる", false, Close));
 

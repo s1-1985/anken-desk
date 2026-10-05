@@ -42,8 +42,20 @@ namespace AnkenDesk.App
             _grid.Columns[0].DefaultCellStyle.Format = "yyyy/MM/dd";
             _grid.Columns[5].DefaultCellStyle.Format = "yyyy/MM/dd";
 
-            var open = UiStyle.CreateButton("エクスプローラーで開く", true, 260);
-            open.Left = 16; open.Top = 480;
+            var detail = UiStyle.CreateButton("案件を開く", true, 200);
+            detail.Left = 16; detail.Top = 480;
+            detail.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            detail.Click += (s, e) => OpenDetail();
+            _grid.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0)
+                {
+                    OpenDetail();
+                }
+            };
+
+            var open = UiStyle.CreateButton("エクスプローラーで開く", false, 260);
+            open.Left = 224; open.Top = 480;
             open.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             open.Click += (s, e) => OpenSelected();
 
@@ -52,13 +64,28 @@ namespace AnkenDesk.App
             close.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             close.Click += (s, e) => Close();
 
-            Controls.AddRange(new Control[] { _grid, open, close });
+            Controls.AddRange(new Control[] { _grid, detail, open, close });
             _grid.DataSource = new System.ComponentModel.BindingList<AnkenRecord>(new System.Collections.Generic.List<AnkenRecord>(_services.Db.ListAnkens()));
         }
 
         private static DataGridViewTextBoxColumn Col(string property, string header, int width)
         {
             return new DataGridViewTextBoxColumn { DataPropertyName = property, HeaderText = header, Width = width };
+        }
+
+        private void OpenDetail()
+        {
+            var rec = _grid.CurrentRow == null ? null : _grid.CurrentRow.DataBoundItem as AnkenRecord;
+            if (rec == null)
+            {
+                MessageBox.Show(this, "一覧から案件を選んでください。", "案件一覧", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new AnkenDetailForm(_services, rec.Id))
+            {
+                dlg.ShowDialog(this);
+            }
         }
 
         private void OpenSelected()
