@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 3;
+        private const int SchemaVersion = 4;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -421,6 +421,20 @@ namespace AnkenDesk.Core
                             + "unit_price TEXT, lead_time_days INTEGER, "
                             + "PRIMARY KEY (history_id, pattern_id))");
                         Exec(conn, tx, "PRAGMA user_version = 3");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 4)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // メールの記録。本文はコピーしない（HANDOFF.md §4）。調達先を案件から外しても記録は残す。
+                        Exec(conn, tx, "CREATE TABLE mail_log ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, anken_id INTEGER NOT NULL REFERENCES anken(id), supplier_id INTEGER, "
+                            + "kind TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL, "
+                            + "entry_id TEXT, sent_at TEXT, msg_path TEXT, created_at TEXT NOT NULL)");
+                        Exec(conn, tx, "PRAGMA user_version = 4");
                         tx.Commit();
                     }
                 }
