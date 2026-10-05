@@ -10,7 +10,23 @@ namespace AnkenDesk.App
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+
+            AppServices services;
+            try
+            {
+                services = new AppServices();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("DBを開けませんでした。\r\n\r\n" + ex.Message, "案件デスク", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (services)
+            {
+                services.EnsureDefaultWorkspaceExists();
+                Application.Run(new MainForm(services));
+            }
         }
     }
 }

@@ -4,7 +4,7 @@ namespace AnkenDesk.Core
     public static class AppInfo
     {
         public const string Name = "案件デスク";
-        public const string Version = "0.1.1";
+        public const string Version = "0.2.0";
 
         public static string Title
         {

@@ -1,69 +1,78 @@
-using System;
 using System.Drawing;
-using System.IO;
 using System.Windows.Forms;
 using AnkenDesk.Core;
 
 namespace AnkenDesk.App
 {
-    /// <summary>骨組みの確認用の画面。会社PCでSQLiteが動くかを確かめるだけで、業務の機能はまだない。</summary>
+    /// <summary>入口の画面。段1では、案件の登録と一覧、得意先・種別の管理、Work spaceの設定ができる。</summary>
     internal sealed class MainForm : Form
     {
-        private readonly TextBox _result;
+        private readonly AppServices _services;
+        private readonly Label _info;
 
-        public MainForm()
+        public MainForm(AppServices services)
         {
+            _services = services;
+            UiStyle.Apply(this);
             Text = AppInfo.Title;
-            ClientSize = new Size(640, 360);
+            ClientSize = new Size(640, 520);
             StartPosition = FormStartPosition.CenterScreen;
-            Font = new Font("BIZ UDPGothic", 11F);
 
             var title = new Label
             {
-                Text = AppInfo.Title + "　（確認用の画面です。業務の機能はまだありません）",
+                Text = AppInfo.Name,
+                Font = new Font("BIZ UDPGothic", 20F, FontStyle.Bold),
                 Dock = DockStyle.Top,
-                Height = 40,
-                TextAlign = ContentAlignment.MiddleLeft,
+                Height = 56,
+                Padding = new Padding(16, 12, 0, 0),
             };
 
-            _result = new TextBox
+            _info = new Label
             {
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Bottom,
+                Height = 90,
+                Padding = new Padding(16, 8, 16, 8),
+            };
+
+            var panel = new FlowLayoutPanel
+            {
                 Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Padding = new Padding(16),
             };
 
-            var check = new Button { Text = "SQLiteの動作確認", Dock = DockStyle.Bottom, Height = 40 };
-            check.Click += (s, e) => RunSmokeTest();
+            panel.Controls.Add(MenuButton("案件を登録", true, () => new RegisterForm(_services).ShowDialog(this)));
+            panel.Controls.Add(MenuButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)));
+            panel.Controls.Add(MenuButton("得意先・種別の管理", false, () => new ClientsForm(_services).ShowDialog(this)));
+            panel.Controls.Add(MenuButton("設定（Work spaceの場所）", false, () => new SettingsForm(_services).ShowDialog(this)));
+            panel.Controls.Add(MenuButton("閉じる", false, Close));
 
-            var close = new Button { Text = "閉じる", Dock = DockStyle.Bottom, Height = 40 };
-            close.Click += (s, e) => Close();
-
-            Controls.Add(_result);
+            Controls.Add(panel);
+            Controls.Add(_info);
             Controls.Add(title);
-            Controls.Add(check);
-            Controls.Add(close);
+
+            Activated += (s, e) => RefreshInfo();
+            RefreshInfo();
         }
 
-        private static string DbPath()
+        private Button MenuButton(string text, bool primary, System.Action action)
         {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AnkenDesk");
-            return Path.Combine(dir, "smoke.db");
+            var b = UiStyle.CreateButton(text, primary, 360);
+            b.Height = 48;
+            b.Click += (s, e) =>
+            {
+                action();
+                RefreshInfo();
+            };
+            return b;
         }
 
-        private void RunSmokeTest()
+        private void RefreshInfo()
         {
-            try
-            {
-                _result.Text = DbSmokeTest.Run(DbPath()).Replace("\n", "\r\n");
-            }
-            catch (Exception ex)
-            {
-                _result.Text = "結果: NG\r\n" + ex.GetType().FullName + "\r\n" + ex.Message + "\r\n\r\n" + ex;
-            }
+            var kind = _services.IsDefaultWorkspace ? "（検証用のフォルダ）" : "";
+            _info.Text = "案件フォルダを作る場所: " + _services.WorkspaceRoot + kind
+                + "\r\nDBの場所: " + _services.Db.Path;
         }
     }
 }
