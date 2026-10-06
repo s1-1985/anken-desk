@@ -47,6 +47,12 @@ namespace AnkenDesk.App
             _summary.TextAlign = ContentAlignment.MiddleLeft;
             Controls.AddRange(new Control[] { scan, _summary });
 
+            var check = UiStyle.CreateButton("登録済みの案件のフォルダを確認", false, 320);
+            check.Left = 16; check.Top = 660;
+            check.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            check.Click += (s, e) => new FolderCheckForm(_services).ShowDialog(this);
+            Controls.Add(check);
+
             _list.SetBounds(16, 158, 1148, 480);
             _list.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             _list.View = View.Details;

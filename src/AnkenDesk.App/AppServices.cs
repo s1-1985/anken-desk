@@ -16,7 +16,11 @@ namespace AnkenDesk.App
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AnkenDesk");
-            Db = new AnkenDb(Path.Combine(dir, "anken.db"));
+            var dbPath = Path.Combine(dir, "anken.db");
+
+            // DBを開く前に、1日1回、控えを取る（失敗しても起動は続ける）。
+            DbBackup.CreateDaily(dbPath, Path.Combine(dir, "backup"), DateTime.Now);
+            Db = new AnkenDb(dbPath);
 
             // 初回は、本物のWork spaceではなくテスト用のフォルダにする（CLAUDE.md）。
             if (string.IsNullOrEmpty(Db.GetSetting(WorkspaceKey)))
