@@ -37,6 +37,15 @@ namespace AnkenDesk.Core
 
         /// <summary>メールを.msgとして保存する。</summary>
         void SaveAsMsg(string entryId, string path);
+
+        /// <summary>
+        /// Outlookの画面で今選ばれているメール（ドラッグ&ドロップしたメール）。最大 maxCount 通。
+        /// ドラッグすると、そのメールが選ばれた状態になっているので、選択を読む。メール以外の項目は除く。
+        /// </summary>
+        IReadOnlyList<InboundMail> GetSelected(int maxCount);
+
+        /// <summary>メールの本文（テキスト）。長いときは maxChars 文字で切る。</summary>
+        string ReadBody(string entryId, int maxChars);
     }
 
     /// <summary>取り込みの結果。</summary>
@@ -47,6 +56,9 @@ namespace AnkenDesk.Core
         public string? MsgPath { get; set; }
         public List<string> Errors { get; } = new List<string>();
         public bool ReceivedDateMarked { get; set; }
+
+        /// <summary>メールの内容をメモに残したか。</summary>
+        public bool NoteRecorded { get; set; }
 
         public bool AnythingSaved
         {
@@ -65,9 +77,27 @@ namespace AnkenDesk.Core
         /// 保存できたものがあれば、記録（mail_log）に残し、markReceivedDate が指定されていれば「回答受領日」を入れる。
         /// 1つの保存の失敗で、ほかを止めない（失敗は Errors に入れる）。
         /// </summary>
+        /// <summary>メモに残す本文の最大の長さ。全文は .msg に残る。</summary>
+        public const int NoteBodyMaxChars = 4000;
+
+        /// <summary>メモに残す文面: 受信日時・差出人・件名・本文（長ければ切る）。</summary>
+        public static string MailNoteText(InboundMail mail, string body)
+        {
+            var text = (body ?? "").Replace("\r\n", "\n").Trim();
+            if (text.Length > NoteBodyMaxChars)
+            {
+                text = text.Substring(0, NoteBodyMaxChars) + "\n…（以降は省略。全文は.msgを見てください）";
+            }
+
+            return "【メール】" + mail.ReceivedAt.ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+                + "　" + (string.IsNullOrEmpty(mail.SenderName) ? mail.SenderAddress : mail.SenderName + " <" + mail.SenderAddress + ">")
+                + "\n件名: " + mail.Subject + "\n\n" + text;
+        }
+
         public static ImportOutcome Import(
             IMailInbox inbox, AnkenDb db, AnkenRecord anken, string ankenFullPath, Supplier supplier, InboundMail mail,
-            IReadOnlyCollection<int> attachmentIndexes, bool saveMsg, DateTime? markReceivedDate, DateTime now)
+            IReadOnlyCollection<int> attachmentIndexes, bool saveMsg, DateTime? markReceivedDate, DateTime now,
+            bool recordBodyAsNote = false)
         {
             if (!Directory.Exists(ankenFullPath))
             {
@@ -132,7 +162,21 @@ namespace AnkenDesk.Core
                 }
             }
 
-            if (outcome.AnythingSaved)
+            if (recordBodyAsNote)
+            {
+                try
+                {
+                    var body = inbox.ReadBody(mail.EntryId, NoteBodyMaxChars);
+                    db.AddNote(anken.Id, supplier.Id, MailNoteText(mail, body), "mail");
+                    outcome.NoteRecorded = true;
+                }
+                catch (Exception ex) when (!(ex is OutOfMemoryException))
+                {
+                    outcome.Errors.Add("メールの内容のメモ: " + ex.Message);
+                }
+            }
+
+            if (outcome.AnythingSaved || outcome.NoteRecorded)
             {
                 db.AddMailLog(new MailLogEntry
                 {

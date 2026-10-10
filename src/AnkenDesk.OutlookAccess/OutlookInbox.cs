@@ -117,6 +117,82 @@ namespace AnkenDesk.OutlookAccess
             }
         }
 
+        public IReadOnlyList<InboundMail> GetSelected(int maxCount)
+        {
+            var result = new List<InboundMail>();
+            dynamic? explorer = null;
+            dynamic? selection = null;
+            try
+            {
+                explorer = _app!.ActiveExplorer();
+                if (explorer == null)
+                {
+                    return result;
+                }
+
+                selection = explorer.Selection;
+                int n = selection.Count;
+                for (var i = 1; i <= n && result.Count < maxCount; i++)
+                {
+                    dynamic? item = null;
+                    try
+                    {
+                        item = selection[i];
+                        if ((int)item.Class != OlMailClass)
+                        {
+                            continue;
+                        }
+
+                        DateTime received;
+                        try
+                        {
+                            received = (DateTime)item.ReceivedTime;
+                        }
+                        catch (COMException)
+                        {
+                            received = (DateTime)item.SentOn; // 送信済みのメールには受信日時が無い
+                        }
+
+                        result.Add(ReadMail(item, received));
+                    }
+                    catch (COMException)
+                    {
+                        // 読めない項目は飛ばす。
+                    }
+                    finally
+                    {
+                        Release(item);
+                    }
+                }
+            }
+            catch (COMException)
+            {
+                // Outlookの画面が無い、など。何も返さない。
+            }
+            finally
+            {
+                Release(selection);
+                Release(explorer);
+            }
+
+            return result;
+        }
+
+        public string ReadBody(string entryId, int maxChars)
+        {
+            dynamic? item = null;
+            try
+            {
+                item = _ns!.GetItemFromID(entryId);
+                var body = (string)item.Body;
+                return body != null && body.Length > maxChars ? body.Substring(0, maxChars) : (body ?? "");
+            }
+            finally
+            {
+                Release(item);
+            }
+        }
+
         public void SaveAsMsg(string entryId, string path)
         {
             dynamic? item = null;

@@ -16,7 +16,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT id, name, short_name, email, address FROM supplier ORDER BY name";
+                cmd.CommandText = "SELECT id, name, short_name, email, address, specialty FROM supplier ORDER BY name";
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read())
@@ -28,6 +28,7 @@ namespace AnkenDesk.Core
                             ShortName = r.GetString(2),
                             Email = r.GetString(3),
                             Address = r.GetString(4),
+                            Specialty = r.GetString(5),
                         });
                     }
                 }
@@ -239,13 +240,30 @@ namespace AnkenDesk.Core
                     }
                 }
 
+                var breakdowns = new List<string>();
+                using (var b = conn.CreateCommand())
+                {
+                    b.Transaction = tx;
+                    b.CommandText = "SELECT pattern_id, item, amount FROM quote_breakdown WHERE anken_id = $a AND supplier_id = $s ORDER BY pattern_id, seq";
+                    b.Parameters.AddWithValue("$a", ankenId);
+                    b.Parameters.AddWithValue("$s", supplierId);
+                    using (var r = b.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            breakdowns.Add(r.GetInt64(0) + "|" + SnapshotText(r.GetString(1)) + "|" + r.GetString(2));
+                        }
+                    }
+                }
+
                 using (var snap = conn.CreateCommand())
                 {
                     snap.Transaction = tx;
-                    snap.CommandText = "INSERT INTO removed_supplier (anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, removed_at) "
-                        + "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, $quotes, $now "
+                    snap.CommandText = "INSERT INTO removed_supplier (anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, breakdowns, removed_at) "
+                        + "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, $quotes, $breakdowns, $now "
                         + "FROM anken_supplier WHERE anken_id = $a AND supplier_id = $s";
                     snap.Parameters.AddWithValue("$quotes", string.Join(";", quotes));
+                    snap.Parameters.AddWithValue("$breakdowns", string.Join(";", breakdowns));
                     snap.Parameters.AddWithValue("$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
                     snap.Parameters.AddWithValue("$a", ankenId);
                     snap.Parameters.AddWithValue("$s", supplierId);
@@ -263,6 +281,12 @@ namespace AnkenDesk.Core
 
                 tx.Commit();
             }
+        }
+
+        // 控えの文字列の区切り（; |）が項目名に入っていても壊れないよう、全角に置き換える。
+        private static string SnapshotText(string text)
+        {
+            return (text ?? "").Replace(';', '；').Replace('|', '｜');
         }
 
         public IReadOnlyList<Quote> ListQuotes(long ankenId)

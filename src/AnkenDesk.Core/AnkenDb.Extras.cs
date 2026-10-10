@@ -124,11 +124,11 @@ namespace AnkenDesk.Core
             {
                 long ankenId, supplierId;
                 string? sent, recv;
-                string extra, relax, note, quotes;
+                string extra, relax, note, quotes, breakdowns;
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = tx;
-                    cmd.CommandText = "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes FROM removed_supplier WHERE id = $id";
+                    cmd.CommandText = "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, breakdowns FROM removed_supplier WHERE id = $id";
                     cmd.Parameters.AddWithValue("$id", removedId);
                     using (var r = cmd.ExecuteReader())
                     {
@@ -145,6 +145,7 @@ namespace AnkenDesk.Core
                         relax = r.GetString(5);
                         note = r.GetString(6);
                         quotes = r.GetString(7);
+                        breakdowns = r.GetString(8);
                     }
                 }
 
@@ -190,6 +191,30 @@ namespace AnkenDesk.Core
                         cmd.Parameters.AddWithValue("$p", long.Parse(f[0], CultureInfo.InvariantCulture));
                         cmd.Parameters.AddWithValue("$price", f[1].Length == 0 ? (object)DBNull.Value : f[1]);
                         cmd.Parameters.AddWithValue("$lt", f[2].Length == 0 ? (object)DBNull.Value : (object)int.Parse(f[2], CultureInfo.InvariantCulture));
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                var seq = 0;
+                foreach (var part in breakdowns.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var f = part.Split('|');
+                    if (f.Length < 3)
+                    {
+                        continue;
+                    }
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = "INSERT OR IGNORE INTO quote_breakdown (anken_id, supplier_id, pattern_id, seq, item, amount) "
+                            + "SELECT $a, $s, $p, $seq, $item, $amount WHERE EXISTS (SELECT 1 FROM quantity_pattern WHERE id = $p)";
+                        cmd.Parameters.AddWithValue("$a", ankenId);
+                        cmd.Parameters.AddWithValue("$s", supplierId);
+                        cmd.Parameters.AddWithValue("$p", long.Parse(f[0], CultureInfo.InvariantCulture));
+                        cmd.Parameters.AddWithValue("$seq", seq++);
+                        cmd.Parameters.AddWithValue("$item", f[1]);
+                        cmd.Parameters.AddWithValue("$amount", f[2]);
                         cmd.ExecuteNonQuery();
                     }
                 }
