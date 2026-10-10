@@ -31,6 +31,15 @@ namespace AnkenDesk.Core
         /// <summary>この案件に加えてある調達先の名前と略称（検索用）。</summary>
         public IReadOnlyList<string> SupplierNames { get; set; } = new List<string>();
 
+        /// <summary>見積依頼を送った（依頼送付日がある）のに、まだ回答が無い調達先。催促の相手。</summary>
+        public IReadOnlyList<long> RemindSupplierIds { get; set; } = new List<long>();
+
+        /// <summary>次の操作が「催促メールを作成」になる。</summary>
+        public bool CanRemind
+        {
+            get { return RemindSupplierIds.Count > 0; }
+        }
+
         public bool NeedsAction
         {
             get { return Total > 0 && Answered < Total; }
@@ -100,6 +109,7 @@ namespace AnkenDesk.Core
                     Answered = list.Count(s => s.IsAnswered),
                     DaysToDue = (a.ReplyDueDate.Date - today.Date).Days,
                     PendingNames = list.Where(s => !s.IsAnswered).Select(s => s.ShortName).ToList(),
+                    RemindSupplierIds = list.Where(s => !s.IsAnswered && s.SentAt != null).Select(s => s.SupplierId).ToList(),
                     SupplierNames = list.SelectMany(s => new[] { s.SupplierName, s.ShortName }).Distinct().ToList(),
                 });
             }

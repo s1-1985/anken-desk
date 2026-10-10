@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -41,6 +42,8 @@ namespace AnkenDesk.App
         private readonly Label _pathLabel = new Label();
         private readonly Label _warn = new Label();
         private readonly Button _register;
+        private readonly ListBox _dropList = new ListBox();
+        private readonly List<string> _dropFiles = new List<string>();
 
         public RegisterForm(AppServices services)
         {
@@ -251,13 +254,52 @@ namespace AnkenDesk.App
             _warn.Font = new Font("BIZ UDPGothic", 11F, FontStyle.Bold);
             p.Controls.Add(_warn);
 
-            var list = new ListBox { Left = 0, Top = 204, Width = 388, Height = 330, IntegralHeight = false, SelectionMode = SelectionMode.None, TabStop = false };
+            var list = new ListBox { Left = 0, Top = 204, Width = 388, Height = 150, IntegralHeight = false, SelectionMode = SelectionMode.None, TabStop = false };
             list.Items.AddRange(FolderNames.Subfolders);
             p.Controls.Add(list);
 
+            p.Controls.Add(new Label { Text = "客先の依頼ファイル（ここへドロップ）", Left = 0, Top = 360, Width = 388, Height = 24 });
+            _dropList.SetBounds(0, 386, 388, 108);
+            _dropList.IntegralHeight = false;
+            _dropList.AllowDrop = true;
+            _dropList.DragEnter += (s, e) => e.Effect = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            _dropList.DragDrop += (s, e) =>
+            {
+                var dropped = e.Data == null ? null : e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (dropped != null)
+                {
+                    AddDropped(dropped);
+                }
+            };
+            p.Controls.Add(_dropList);
+
+            var addFile = UiStyle.CreateButton("ファイルを追加...", false, 190);
+            addFile.Left = 0; addFile.Top = 498;
+            addFile.Click += (s, e) =>
+            {
+                using (var dlg = new OpenFileDialog { Multiselect = true, Title = "客先の依頼ファイルを選ぶ" })
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        AddDropped(dlg.FileNames);
+                    }
+                }
+            };
+            var removeFile = UiStyle.CreateButton("選んだものを外す", false, 190);
+            removeFile.Left = 198; removeFile.Top = 498;
+            removeFile.Click += (s, e) =>
+            {
+                if (_dropList.SelectedIndex >= 0)
+                {
+                    _dropFiles.RemoveAt(_dropList.SelectedIndex);
+                    ShowDropped();
+                }
+            };
+            p.Controls.AddRange(new Control[] { addFile, removeFile });
+
             var root = new Label
             {
-                Left = 0, Top = 540, Width = 388, Height = 80,
+                Left = 0, Top = 546, Width = 388, Height = 80,
                 Text = "作成する場所:\r\n" + _services.WorkspaceRoot + (_services.IsDefaultWorkspace ? "（検証用のフォルダ）" : ""),
             };
             p.Controls.Add(root);
@@ -363,6 +405,31 @@ namespace AnkenDesk.App
             return problem;
         }
 
+        // ---- 客先の依頼ファイル ----
+
+        private void AddDropped(IEnumerable<string> paths)
+        {
+            foreach (var path in paths)
+            {
+                if (File.Exists(path) && !_dropFiles.Contains(path, StringComparer.OrdinalIgnoreCase))
+                {
+                    _dropFiles.Add(path);
+                }
+            }
+
+            ShowDropped();
+        }
+
+        private void ShowDropped()
+        {
+            _dropList.Items.Clear();
+            foreach (var f in _dropFiles)
+            {
+                var name = Path.GetFileName(f);
+                _dropList.Items.Add(name + "　→　" + RequestFiles.TargetSubfolder(name));
+            }
+        }
+
         // ---- 登録 ----
 
         private void DoRegister()
@@ -401,7 +468,21 @@ namespace AnkenDesk.App
             try
             {
                 var rec = _registrar.Register(input);
-                MessageBox.Show(this, "登録しました。\r\n\r\n" + _registrar.FullPath(rec.FolderPath), "案件を登録", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var msg = "登録しました。\r\n\r\n" + _registrar.FullPath(rec.FolderPath);
+                var icon = MessageBoxIcon.Information;
+                if (_dropFiles.Count > 0)
+                {
+                    var copied = RequestFiles.CopyInto(_registrar.FullPath(rec.FolderPath), _dropFiles);
+                    var failed = copied.Where(c => c.Destination == null).ToList();
+                    msg += "\r\n\r\n依頼ファイルを " + (copied.Count - failed.Count) + " 件コピーしました。";
+                    if (failed.Count > 0)
+                    {
+                        icon = MessageBoxIcon.Warning;
+                        msg += "\r\nコピーできなかったもの:\r\n" + string.Join("\r\n", failed.Select(f => Path.GetFileName(f.Source) + "（" + f.Error + "）"));
+                    }
+                }
+
+                MessageBox.Show(this, msg, "案件を登録", MessageBoxButtons.OK, icon);
                 DialogResult = DialogResult.OK;
             }
             catch (DuplicateFolderException)

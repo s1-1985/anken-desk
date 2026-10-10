@@ -259,8 +259,7 @@ namespace AnkenDesk.App
             var action = new DataGridViewButtonColumn
             {
                 HeaderText = "次の操作",
-                Text = "案件を開く",
-                UseColumnTextForButtonValue = true,
+                UseColumnTextForButtonValue = false,
                 Width = 140,
                 FlatStyle = FlatStyle.Flat,
                 SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -271,7 +270,15 @@ namespace AnkenDesk.App
             {
                 if (e.RowIndex >= 0 && e.ColumnIndex == _grid.Columns.Count - 1)
                 {
-                    OpenDetail(e.RowIndex);
+                    var row = _grid.Rows[e.RowIndex].Tag as HomeRow;
+                    if (row != null && row.CanRemind)
+                    {
+                        Remind(row);
+                    }
+                    else
+                    {
+                        OpenDetail(e.RowIndex);
+                    }
                 }
             };
             _grid.CellDoubleClick += (s, e) =>
@@ -335,7 +342,7 @@ namespace AnkenDesk.App
                     a.ClientName,
                     title,
                     progress,
-                    "案件を開く");
+                    r.CanRemind ? "催促メールを作成" : "案件を開く");
                 var row = _grid.Rows[idx];
                 row.Tag = r;
                 row.Cells[0].Style.Font = new Font("BIZ UDPGothic", 11F, FontStyle.Bold);
@@ -364,6 +371,17 @@ namespace AnkenDesk.App
         private static string DayName(DateTime d)
         {
             return "日月火水木金土"[(int)d.DayOfWeek].ToString();
+        }
+
+        // 見積依頼を送ったのに回答が無い調達先を選んだ状態で、催促メールの画面を開く。
+        private void Remind(HomeRow r)
+        {
+            using (var dlg = new ComposeMailForm(_services, r.Anken, MailKind.Reminder, r.RemindSupplierIds.ToList()))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
         }
 
         private void OpenDetail(int rowIndex)

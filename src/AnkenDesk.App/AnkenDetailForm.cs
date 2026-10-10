@@ -29,6 +29,9 @@ namespace AnkenDesk.App
         private readonly DataGridView _grid = new DataGridView();
         private readonly ListBox _history = new ListBox();
 
+        // 経過の各行に対応する .msg のフルパス（無い行はnull）。行をダブルクリックして開く。
+        private readonly List<string?> _historyMsg = new List<string?>();
+
         private AnkenRecord _anken = null!;
         private IReadOnlyList<AnkenSupplier> _suppliers = new List<AnkenSupplier>();
 
@@ -155,8 +158,8 @@ namespace AnkenDesk.App
             _history.SetBounds(16, height - historyHeight - 8, 1268, historyHeight);
             _history.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             _history.IntegralHeight = false;
-            _history.SelectionMode = SelectionMode.None;
-            _history.TabStop = false;
+            _history.SelectionMode = SelectionMode.One;
+            _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
             Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
@@ -343,44 +346,83 @@ namespace AnkenDesk.App
             return string.Join("\r\n", names);
         }
 
+        private sealed class HistoryEvent
+        {
+            public DateTime When;
+            public string Text = "";
+            public string? MsgPath;
+        }
+
         private void BuildHistory()
         {
-            var events = new List<KeyValuePair<DateTime, string>>();
-            events.Add(new KeyValuePair<DateTime, string>(_anken.RequestDate, "案件の依頼日"));
+            var events = new List<HistoryEvent>();
+            events.Add(new HistoryEvent { When = _anken.RequestDate, Text = "案件の依頼日" });
             foreach (var s in _suppliers)
             {
                 if (s.SentAt.HasValue)
                 {
-                    events.Add(new KeyValuePair<DateTime, string>(s.SentAt.Value, "依頼を送付（" + s.ShortName + "）"));
+                    events.Add(new HistoryEvent { When = s.SentAt.Value, Text = "依頼を送付（" + s.ShortName + "）" });
                 }
 
                 if (s.ReceivedAt.HasValue)
                 {
-                    events.Add(new KeyValuePair<DateTime, string>(s.ReceivedAt.Value, "回答を受領（" + s.ShortName + "）"));
+                    events.Add(new HistoryEvent { When = s.ReceivedAt.Value, Text = "回答を受領（" + s.ShortName + "）" });
                 }
             }
 
-            // メールの記録（送ったもの・送信トレイに残ったもの・失敗したもの）。
+            // メールの記録（送ったもの・送信トレイに残ったもの・失敗したもの）。.msgがあれば、ダブルクリックで開く。
             var supplierNames = _suppliers.ToDictionary(x => x.SupplierId, x => x.ShortName);
             foreach (var m in _services.Db.ListMailLog(_ankenId))
             {
                 string name;
                 var who = m.SupplierId.HasValue && supplierNames.TryGetValue(m.SupplierId.Value, out name) ? name : m.ToAddress;
-                events.Add(new KeyValuePair<DateTime, string>(m.CreatedAt,
-                    MailSender.KindText(m.Kind) + "メール（" + who + "）　" + m.Status + (m.MsgPath != null ? "　.msg保存済み" : "")));
+                events.Add(new HistoryEvent
+                {
+                    When = m.CreatedAt,
+                    Text = MailSender.KindText(m.Kind) + "メール（" + who + "）　" + m.Status + (m.MsgPath != null ? "　.msg保存済み（ダブルクリックで開く）" : ""),
+                    MsgPath = m.MsgPath == null ? null : Path.Combine(_services.WorkspaceRoot, m.MsgPath),
+                });
             }
 
             _history.Items.Clear();
-            foreach (var ev in events.OrderBy(x => x.Key))
+            _historyMsg.Clear();
+            foreach (var ev in events.OrderBy(x => x.When))
             {
-                var format = ev.Key.TimeOfDay == TimeSpan.Zero ? "yyyy/MM/dd" : "yyyy/MM/dd HH:mm";
-                _history.Items.Add(ev.Key.ToString(format, CultureInfo.InvariantCulture) + "　" + ev.Value);
+                var format = ev.When.TimeOfDay == TimeSpan.Zero ? "yyyy/MM/dd" : "yyyy/MM/dd HH:mm";
+                _history.Items.Add(ev.When.ToString(format, CultureInfo.InvariantCulture) + "　" + ev.Text);
+                _historyMsg.Add(ev.MsgPath);
             }
 
             var pending = _suppliers.Where(s => !s.IsAnswered && s.SentAt.HasValue).ToList();
             foreach (var s in pending)
             {
                 _history.Items.Add("　　　　　　　未回答（" + s.ShortName + "）");
+                _historyMsg.Add(null);
+            }
+        }
+
+        private void OpenHistoryMsg()
+        {
+            var i = _history.SelectedIndex;
+            var path = i >= 0 && i < _historyMsg.Count ? _historyMsg[i] : null;
+            if (path == null)
+            {
+                return;
+            }
+
+            if (!File.Exists(path))
+            {
+                MessageBox.Show(this, ".msgが見つかりません。\r\n" + path, "案件デスク", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                MessageBox.Show(this, ".msgを開けませんでした。\r\n\r\n" + ex.Message, "案件デスク", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
