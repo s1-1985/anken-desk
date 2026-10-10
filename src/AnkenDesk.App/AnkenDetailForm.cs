@@ -85,6 +85,15 @@ namespace AnkenDesk.App
             var importMail = ToolButton("受信メールから取り込む", false, 462, 108, 240);
             importMail.Click += (s, e) => ImportFromMail();
 
+            var gallery = ToolButton("ファイルを画像で見る", false, 710, 108, 220);
+            gallery.Click += (s, e) =>
+            {
+                using (var dlg = new FileGalleryForm(_services, _anken))
+                {
+                    dlg.ShowDialog(this);
+                }
+            };
+
             _hint.SetBounds(16, 156, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
             _hint.Text = "表の調達先の列にファイル（見積書のPDFなど）をドロップすると、「5.調達先見積もり」にコピーして保存します。";
@@ -161,7 +170,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Activated += (s, e) => Reload();
             Reload();
