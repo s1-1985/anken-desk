@@ -129,9 +129,12 @@ namespace AnkenDesk.App
             var result = ToolButton("結果を入力", false, 610, 204, 170);
             result.Click += (s, e) => OpenResult();
 
+            var calendar = ToolButton("回答期限をOutlookの予定表へ", false, 788, 204, 280);
+            calendar.Click += (s, e) => SyncCalendar();
+
             _hint.SetBounds(16, 252, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
-            _hint.Text = "見積書のファイルは表の調達先の列へ。Outlookのメールは、この画面のどこへでもドロップできます（添付の取り込み・内容の記録）。";
+            _hint.Text = "ファイルは表の調達先の列へ（見積書として保存）。それ以外の場所へドロップすると、保存先を選べます。Outlookのメールも、どこへでもドロップできます。";
 
             var band = new Panel { Left = 16, Top = 280, Width = 1268, Height = 80, BackColor = Color.White };
             Place(band, "得意先・種別", _client, 0, 330);
@@ -206,12 +209,20 @@ namespace AnkenDesk.App
 
             // 画面のどこにOutlookのメールを落としても、取り込み画面を開く（ファイルのドロップは、表の調達先の列だけ）
             AllowDrop = true;
-            DragEnter += (s, e) => e.Effect = MailDrop.IsOutlookMail(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            DragEnter += (s, e) => e.Effect = MailDrop.IsOutlookMail(e.Data) || (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) ? DragDropEffects.Copy : DragDropEffects.None;
             DragDrop += (s, e) =>
             {
                 if (MailDrop.IsOutlookMail(e.Data))
                 {
                     BeginInvoke((Action)OpenDroppedMail);
+                    return;
+                }
+
+                var paths = e.Data == null ? null : e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (paths != null && paths.Length > 0)
+                {
+                    var copy = paths.ToArray();
+                    BeginInvoke((Action)(() => SaveFilesWithChoice(copy))); // ドラッグが終わってから、保存先を聞く
                 }
             };
 
@@ -225,7 +236,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, calendar, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Controls.Add(_previewPanel);
             _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
@@ -645,11 +656,81 @@ namespace AnkenDesk.App
             var supplier = hit.ColumnIndex > 0 ? _grid.Columns[hit.ColumnIndex].Tag as AnkenSupplier : null;
             if (supplier == null)
             {
-                MessageBox.Show(this, "表の、調達先の列にドロップしてください。", "見積書の保存", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                SaveFilesWithChoice(paths); // 調達先の列でなければ、保存先を選んでもらう
                 return;
             }
 
             SaveQuoteFiles(supplier, paths);
+        }
+
+        // 保存先を選んでもらってから、コピーする（客先の依頼ファイル／調達先の見積書／指定のサブフォルダ）。
+        private void SaveFilesWithChoice(IReadOnlyList<string> paths)
+        {
+            var files = paths.Where(File.Exists).ToList();
+            if (files.Count == 0)
+            {
+                MessageBox.Show(this, "ファイルをドロップしてください（フォルダは扱えません）。", "ファイルの保存", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new FileTargetForm(files, _suppliers))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                if (dlg.Selected == FileTargetForm.Target.SupplierQuote)
+                {
+                    SaveQuoteFiles(dlg.Supplier!, files);
+                    return;
+                }
+
+                var results = dlg.Selected == FileTargetForm.Target.ClientRequest
+                    ? RequestFiles.CopyInto(AnkenFullPath(), files)
+                    : RequestFiles.CopyToSubfolder(AnkenFullPath(), dlg.SubfolderIndex, files);
+                var ok = results.Where(r => r.Destination != null).ToList();
+                var failed = results.Where(r => r.Destination == null).ToList();
+                ThumbnailService.WarmAsync(ok.Select(r => r.Destination!));
+                SetStatus(ok.Count + " 個のファイルを保存しました");
+                if (failed.Count > 0)
+                {
+                    MessageBox.Show(this, "保存できなかったファイルがあります。\r\n\r\n" + string.Join("\r\n", failed.Select(f => Path.GetFileName(f.Source) + "（" + f.Error + "）")),
+                        "ファイルの保存", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
+                Reload();
+            }
+        }
+
+        // 回答期限を、Outlookの予定表に入れる（入れてあれば、期限の変更などを反映して更新する）。
+        private void SyncCalendar()
+        {
+            var removeFirst = _anken.CalendarEntryId != null && AnkenStatus.IsClosed(_anken.Status);
+            var anken = _anken;
+            try
+            {
+                var entry = Background.Run<string?>(this, "Outlookの予定表に入れています。\r\nしばらくお待ちください。", () =>
+                {
+                    using (var cal = new AnkenDesk.OutlookAccess.OutlookCalendar())
+                    {
+                        if (removeFirst)
+                        {
+                            DeadlineCalendar.Remove(cal, _services.Db, anken);
+                            return null;
+                        }
+
+                        return DeadlineCalendar.Sync(cal, _services.Db, anken);
+                    }
+                });
+                SetStatus(entry == null ? "予定表の予定を削除しました（案件が終了・保留のため）" : "回答期限（" + anken.ReplyDueDate.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture) + "）をOutlookの予定表に入れました");
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(this, "Outlookの予定表に入れられませんでした。\r\n\r\n" + ex.Message, "予定表", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            Reload();
         }
 
         private void SaveQuoteFilesWithDialog()

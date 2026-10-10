@@ -55,6 +55,8 @@ namespace AnkenDesk.App
         private readonly DateTimePicker _receivedDate = new DateTimePicker { Format = DateTimePickerFormat.Short };
         private readonly CheckBox _saveMsg = new CheckBox();
         private readonly CheckBox _recordNote = new CheckBox();
+        private readonly ComboBox _mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private readonly ComboBox _folder = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly bool _fromDrop;
         private readonly Label _hint = new Label();
         private readonly Button _import;
@@ -99,7 +101,7 @@ namespace AnkenDesk.App
             _days.Items.AddRange(new object[] { "7日以内", "14日以内", "30日以内", "90日以内" });
             _days.SelectedIndex = 2;
 
-            _onlyWithAttachment.SetBounds(612, 86, 220, 30);
+            _onlyWithAttachment.SetBounds(612, 86, 190, 30);
             _onlyWithAttachment.Text = "添付があるメールだけ";
             _onlyWithAttachment.Checked = !fromDrop; // ドロップしたメールは、添付が無くても内容を記録できる
             _onlyWithAttachment.CheckedChanged += (s, e) => ApplyFilter();
@@ -109,10 +111,15 @@ namespace AnkenDesk.App
             reload.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             reload.Click += (s, e) => LoadMails();
 
-            _count.SetBounds(850, 88, 180, 26);
+            _folder.SetBounds(806, 84, 110, 32);
+            _folder.Items.AddRange(new object[] { "受信箱", "送信済み" });
+            _folder.SelectedIndex = 0;
+            _folder.Visible = !fromDrop;
+            _folder.SelectedIndexChanged += (s, e) => LoadMails();
+            _count.SetBounds(922, 88, 112, 26);
             _count.TextAlign = ContentAlignment.MiddleRight;
 
-            Controls.AddRange(new Control[] { _search, _days, _onlyWithAttachment, reload, _count });
+            Controls.AddRange(new Control[] { _search, _days, _onlyWithAttachment, _folder, reload, _count });
 
             BuildGrid(h);
             BuildBottom(h);
@@ -176,7 +183,12 @@ namespace AnkenDesk.App
             _attachments.ItemCheck += (s, e) => BeginInvoke((Action)UpdateButtons);
             p.Controls.Add(_attachments);
 
-            p.Controls.Add(new Label { Text = "取り込み先の案件", Left = 410, Top = 6, Width = 300, Height = 22, Font = new Font("BIZ UDPGothic", 11F, FontStyle.Bold) });
+            p.Controls.Add(new Label { Text = "取り込み先の案件", Left = 410, Top = 6, Width = 280, Height = 22, Font = new Font("BIZ UDPGothic", 11F, FontStyle.Bold) });
+            _mode.SetBounds(690, 2, 240, 28);
+            _mode.Items.AddRange(new object[] { "調達先の回答として取り込む", "客先とのやり取りとして保存" });
+            _mode.SelectedIndex = 0;
+            _mode.SelectedIndexChanged += (s, e) => OnModeChanged();
+            p.Controls.Add(_mode);
             _ankenBox.SetBounds(410, 30, 520, 32);
             _ankenBox.SelectedIndexChanged += (s, e) =>
             {
@@ -243,12 +255,13 @@ namespace AnkenDesk.App
             try
             {
                 var fromDrop = _fromDrop;
+                var sent = _folder.SelectedIndex == 1;
                 var mails = Background.Run<IReadOnlyList<InboundMail>>(this,
                     fromDrop ? "Outlookで選んだメールを読んでいます。\r\nしばらくお待ちください。" : "Outlookの受信箱を読んでいます。\r\nしばらくお待ちください。", () =>
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return fromDrop ? inbox.GetSelected(30) : inbox.ListRecent(days, 300);
+                        return fromDrop ? inbox.GetSelected(30) : inbox.ListRecent(days, 300, sent);
                     }
                 });
                 if (_fromDrop && mails.Count == 0)
@@ -393,6 +406,30 @@ namespace AnkenDesk.App
             UpdateButtons();
         }
 
+        private bool ClientMode
+        {
+            get { return _mode.SelectedIndex == 1; }
+        }
+
+        // 客先とのやり取りのときは、調達先・回答受領日は使わない。添付は、全部を初期値にする（PDFだけにはしない）。
+        private void OnModeChanged()
+        {
+            var client = ClientMode;
+            _supplierBox.Enabled = !client;
+            _markReceived.Enabled = !client;
+            _receivedDate.Enabled = !client;
+            if (_current != null)
+            {
+                for (var i = 0; i < _current.Attachments.Count; i++)
+                {
+                    var isPdf = string.Equals(Path.GetExtension(_current.Attachments[i].FileName), ".pdf", StringComparison.OrdinalIgnoreCase);
+                    _attachments.SetItemChecked(i, client || isPdf);
+                }
+            }
+
+            UpdateButtons();
+        }
+
         private void UpdateButtons()
         {
             var problems = new List<string>();
@@ -404,6 +441,10 @@ namespace AnkenDesk.App
             if (_ankenBox.SelectedItem == null)
             {
                 problems.Add("取り込み先の案件を選んでください。");
+            }
+            else if (ClientMode)
+            {
+                // 客先とのやり取りは、調達先なしで保存できる。
             }
             else if (_supplierBox.Items.Count == 0)
             {
@@ -435,12 +476,109 @@ namespace AnkenDesk.App
 
         // ---- 取り込み ----
 
+        // 客先とのやり取り: 添付は 1.（Excel・その他）と 2.（PDF）へ、.msgは 1. へ、内容はメモへ（調達先なし）。
+        private void DoImportClient(InboundMail mail, AnkenItem anken)
+        {
+            var indexes = new List<int>();
+            for (var i = 0; i < mail.Attachments.Count; i++)
+            {
+                if (_attachments.GetItemChecked(i))
+                {
+                    indexes.Add(mail.Attachments[i].Index);
+                }
+            }
+
+            var saveMsg = _saveMsg.Checked;
+            var recordNote = _recordNote.Checked;
+            var full = Path.Combine(_services.WorkspaceRoot, anken.Anken.FolderPath);
+            var confirm = new StringBuilder();
+            confirm.AppendLine("客先とのやり取りとして、次の内容で保存します。");
+            confirm.AppendLine();
+            confirm.AppendLine("案件: " + anken);
+            confirm.AppendLine("メール: " + mail.Subject);
+            foreach (var i in indexes)
+            {
+                var a = mail.Attachments.First(x => x.Index == i);
+                confirm.AppendLine("　・" + a.FileName + " → " + RequestFiles.TargetSubfolder(a.FileName));
+            }
+
+            if (saveMsg)
+            {
+                confirm.AppendLine("　・メール（.msg）→「" + FolderNames.Subfolders[0] + "」");
+            }
+
+            if (recordNote)
+            {
+                confirm.AppendLine("　・メールの内容 → メモ");
+            }
+
+            if (MessageBox.Show(this, confirm.ToString(), "取り込みの確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            var services = _services;
+            var ankenRec = anken.Anken;
+            ImportOutcome outcome;
+            try
+            {
+                outcome = Background.Run<ImportOutcome>(this, "メールから取り込んでいます。\r\nしばらくお待ちください。", () =>
+                {
+                    using (var inbox = new OutlookInbox())
+                    {
+                        return ClientMailImporter.Import(inbox, services.Db, ankenRec, full, mail, indexes, saveMsg, recordNote, DateTime.Now);
+                    }
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(this, "取り込めませんでした。\r\n\r\n" + ex.Message, "受信メールの取り込み", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var sb = new StringBuilder();
+            if (outcome.SavedFiles.Count > 0)
+            {
+                sb.AppendLine("保存したファイル: " + outcome.SavedFiles.Count + " 件");
+            }
+
+            if (outcome.MsgPath != null)
+            {
+                sb.AppendLine("メール（.msg）を保存しました。");
+            }
+
+            if (outcome.NoteRecorded)
+            {
+                sb.AppendLine("メールの内容を、メモに残しました。");
+            }
+
+            foreach (var e in outcome.Errors)
+            {
+                sb.AppendLine("取り込めなかったもの: " + e);
+            }
+
+            MessageBox.Show(this, sb.ToString(), outcome.Errors.Count == 0 ? "取り込みました" : "取り込みの結果",
+                MessageBoxButtons.OK, outcome.Errors.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            ThumbnailService.WarmAsync(outcome.SavedFiles);
+        }
+
         private void DoImport()
         {
             var mail = _current;
             var anken = _ankenBox.SelectedItem as AnkenItem;
             var supplier = _supplierBox.SelectedItem as SupplierItem;
-            if (mail == null || anken == null || supplier == null)
+            if (mail == null || anken == null || (supplier == null && !ClientMode))
+            {
+                return;
+            }
+
+            if (ClientMode)
+            {
+                DoImportClient(mail, anken);
+                return;
+            }
+
+            if (supplier == null)
             {
                 return;
             }

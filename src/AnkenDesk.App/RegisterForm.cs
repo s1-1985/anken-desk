@@ -46,15 +46,18 @@ namespace AnkenDesk.App
         private readonly List<string> _dropFiles = new List<string>();
 
         private readonly long? _templateAnkenId;
+        private readonly StagedClientMail? _staged;
         private readonly Label _autoNote = new Label();
         private bool _itemsTouched;
         private bool _autoFill;
 
         /// <param name="templateAnkenId">元にする案件（数量・項目・調達先を引き継ぐ。品番と備考は空にする）。</param>
-        public RegisterForm(AppServices services, long? templateAnkenId = null)
+        /// <param name="staged">客先の依頼メール（取り出し済み）から登録する。依頼日・品番の候補・添付が入った状態で開く。</param>
+        public RegisterForm(AppServices services, long? templateAnkenId = null, StagedClientMail? staged = null)
         {
             _services = services;
             _templateAnkenId = templateAnkenId;
+            _staged = staged;
             _registrar = services.CreateRegistrar();
             UiStyle.Apply(this);
             Text = "案件を登録";
@@ -92,7 +95,7 @@ namespace AnkenDesk.App
             _register.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             _register.Click += (s, e) => DoRegister();
 
-            _autoNote.SetBounds(460, 22, 704, 28);
+            _autoNote.SetBounds(440, 6, 724, 50);
             _autoNote.ForeColor = Color.FromArgb(90, 96, 100);
             Controls.AddRange(new Control[] { title, _autoNote, left, right, cancel, _register });
             AcceptButton = _register;
@@ -120,6 +123,12 @@ namespace AnkenDesk.App
             else
             {
                 ApplyItemsForClient();
+            }
+
+            if (_staged != null)
+            {
+                ApplyStagedMail(_staged);
+                FormClosed += (s, e) => _staged.Dispose();
             }
 
             _client.SelectedIndexChanged += (s, e) =>
@@ -468,6 +477,24 @@ namespace AnkenDesk.App
             }
         }
 
+        // 客先の依頼メールから: 依頼日はメールの日付、品番は件名から拾った候補の先頭、添付は依頼ファイルの欄に入れる。
+        private void ApplyStagedMail(StagedClientMail staged)
+        {
+            _requestDate.Value = staged.Mail.ReceivedAt.Date;
+            _dueDate.Value = _requestDate.Value.AddDays(7);
+            var guesses = PartNumberGuess.FromSubject(staged.Mail.Subject);
+            if (guesses.Count > 0)
+            {
+                _part.Text = guesses[0];
+            }
+
+            AddDropped(staged.AttachmentPaths);
+            _autoNote.Text = "客先メール「" + staged.Mail.Subject + "」から登録します。"
+                + (guesses.Count > 0 ? "品番の候補: " + string.Join(" / ", guesses) + "（先頭を入れました。違えば直してください）。" : "件名から品番を拾えませんでした。品番を入力してください。")
+                + (staged.Errors.Count > 0 ? "　※一部取り出せませんでした: " + staged.Errors.Count + " 件" : "");
+            _part.Select();
+        }
+
         // 元にする案件の、得意先・品名・数量・項目を入れる。品番と備考は新しく入力する。
         private void ApplyTemplate(long ankenId)
         {
@@ -583,6 +610,18 @@ namespace AnkenDesk.App
                     {
                         icon = MessageBoxIcon.Warning;
                         msg += "\r\nコピーできなかったもの:\r\n" + string.Join("\r\n", failed.Select(f => Path.GetFileName(f.Source) + "（" + f.Error + "）"));
+                    }
+                }
+
+                if (_staged != null)
+                {
+                    // 客先メールの .msg を 1. へ、本文をメモへ、記録（種別「客先」）へ。添付は、上で振り分けてコピー済み。
+                    var recorded = ClientMailImporter.RecordStaged(_services.Db, rec, _registrar.FullPath(rec.FolderPath), _staged.Mail, _staged.MsgPath, _staged.Body, DateTime.Now);
+                    msg += "\r\n客先メールを記録しました" + (recorded.MsgPath != null ? "（.msg・" : "（") + (recorded.NoteRecorded ? "内容のメモ）。" : "）。");
+                    if (recorded.Errors.Count > 0)
+                    {
+                        icon = MessageBoxIcon.Warning;
+                        msg += "\r\n" + string.Join("\r\n", recorded.Errors);
                     }
                 }
 

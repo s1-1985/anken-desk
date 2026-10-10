@@ -141,13 +141,16 @@ namespace AnkenDesk.App
             {
                 NavButton("ホーム（要対応）", true, null),
                 NavButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)),
+                NavButton("受信メールの自動仕分け", false, () => new TriageForm(_services).ShowDialog(this)),
                 NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
+                NavButton("横断検索", false, () => new SearchForm(_services).ShowDialog(this)),
                 NavButton("既存フォルダを取り込む", false, () => new ImportFolderForm(_services).ShowDialog(this)),
                 (_navRemind = NavButton("催促が必要な案件", false, () => OpenReminderBatch())),
                 NavButton("一覧をExcelに書き出す", false, () => ExportList()),
                 NavButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)),
                 NavButton("得意先・種別", false, () => new ClientsForm(_services).ShowDialog(this)),
                 NavButton("見積依頼書の既定値", false, () => new ItemDefaultsForm(_services).ShowDialog(this)),
+                NavButton("Outlookの接続を確認", false, () => CheckOutlook()),
                 NavButton("設定・DBの控え", false, () => new SettingsForm(_services).ShowDialog(this)),
             };
             var spacer = new Panel { Dock = DockStyle.Top, Height = 16 };
@@ -170,7 +173,7 @@ namespace AnkenDesk.App
             {
                 Text = text,
                 Dock = DockStyle.Top,
-                Height = 48,
+                Height = 40,
                 FlatStyle = FlatStyle.Flat,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(10, 0, 0, 0),
@@ -449,10 +452,115 @@ namespace AnkenDesk.App
             return "日月火水木金土"[(int)d.DayOfWeek].ToString();
         }
 
+        // Outlookとの接続の状態を調べて知らせる（起動しているか、オフライン作業中でないか、など）。
+        private void CheckOutlook()
+        {
+            AnkenDesk.OutlookAccess.OutlookStatusCheck.Result r;
+            try
+            {
+                r = Background.Run<AnkenDesk.OutlookAccess.OutlookStatusCheck.Result>(this, "Outlookの状態を調べています。\r\nしばらくお待ちください。",
+                    () => AnkenDesk.OutlookAccess.OutlookStatusCheck.Run());
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(this, "調べられませんでした。\r\n\r\n" + ex.Message, "Outlookの接続", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (r.Error.Length > 0)
+            {
+                MessageBox.Show(this, "Outlookに接続できませんでした。\r\n\r\n" + r.Error + "\r\n\r\nデスクトップ版（クラシック）のOutlookが入っているか、確認してください。",
+                    "Outlookの接続", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Outlookに接続できました。");
+            sb.AppendLine();
+            sb.AppendLine("・状態: " + (r.Running ? "起動中のOutlookに接続" : "未起動だったので、一時的に起動して確認（終了しました）"));
+            sb.AppendLine("・バージョン: " + r.Version);
+            if (r.Profile.Length > 0)
+            {
+                sb.AppendLine("・プロファイル: " + r.Profile);
+            }
+
+            sb.AppendLine("・オフライン作業: " + (r.Offline ? "はい（このままだと、送ったメールが送信トレイに残ります）" : "いいえ（オンライン）"));
+            sb.AppendLine("・受信箱: " + r.InboxCount + " 通（未読 " + r.InboxUnread + " 通）");
+            MessageBox.Show(this, sb.ToString(), "Outlookの接続", MessageBoxButtons.OK, r.Offline ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+
         // ドロップのあとで（ドラッグが終わってから）、Outlookで選ばれているメールを取り込む画面を開く。
         private void OpenDroppedMail(long? ankenId)
         {
+            if (!ankenId.HasValue)
+            {
+                // 案件が決まっていないとき: 新しい案件として登録するか、既存の案件に取り込むか。
+                using (var choice = new DropChoiceForm())
+                {
+                    if (choice.ShowDialog(this) != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    if (choice.Selected == DropChoiceForm.Choice.NewAnken)
+                    {
+                        RegisterFromDroppedMail();
+                        return;
+                    }
+                }
+            }
+
             using (var dlg = new ImportMailForm(_services, ankenId, true))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        // Outlookで選ばれているメール（先頭の1通）を取り出して、新しい案件の登録画面を開く。
+        private void RegisterFromDroppedMail()
+        {
+            InboundMail? mail;
+            try
+            {
+                var mails = Background.Run<IReadOnlyList<InboundMail>>(this, "Outlookで選んだメールを読んでいます。\r\nしばらくお待ちください。", () =>
+                {
+                    using (var inbox = new AnkenDesk.OutlookAccess.OutlookInbox())
+                    {
+                        return inbox.GetSelected(5);
+                    }
+                });
+                mail = mails.FirstOrDefault();
+                if (mails.Count > 1)
+                {
+                    MessageBox.Show(this, "メールが " + mails.Count + " 通 選ばれています。先頭の1通（" + mail!.Subject + "）から登録します。", "新しい案件として登録", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(this, "Outlookのメールを読めませんでした。\r\n\r\n" + ex.Message, "新しい案件として登録", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (mail == null)
+            {
+                MessageBox.Show(this, "Outlookで選ばれているメールが見つかりませんでした。", "新しい案件として登録", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            StagedClientMail staged;
+            try
+            {
+                staged = StagedClientMail.Stage(this, mail);
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(this, "メールを取り出せませんでした。\r\n\r\n" + ex.Message, "新しい案件として登録", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (var dlg = new RegisterForm(_services, null, staged))
             {
                 dlg.ShowDialog(this);
             }
