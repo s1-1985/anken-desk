@@ -15,6 +15,9 @@ namespace AnkenDesk.App
         private readonly Label _hint = new Label();
 
         private readonly IReadOnlyList<long> _recent;
+        private readonly TextBox _search = new TextBox();
+        private readonly HashSet<long> _checked = new HashSet<long>(); // 検索で絞っても、チェックを覚えておく
+        private bool _reloading;
 
         public List<Supplier> Chosen { get; } = new List<Supplier>();
 
@@ -26,7 +29,7 @@ namespace AnkenDesk.App
 
             public override string ToString()
             {
-                return (Recent ? "★前回　" : "") + Supplier.Name;
+                return (Recent ? "★前回　" : "") + Supplier.Name + (string.IsNullOrWhiteSpace(Supplier.Specialty) ? "" : "　【" + Supplier.Specialty + "】");
             }
         }
 
@@ -40,10 +43,31 @@ namespace AnkenDesk.App
             Text = "調達先を加える";
             ClientSize = new Size(560, 520);
 
-            Controls.Add(new Label { Text = "この案件で見積を依頼する調達先を選んでください。", Left = 16, Top = 12, Width = 528, Height = 28 });
+            Controls.Add(new Label { Text = "見積を依頼する調達先を選んでください（下の欄で、名前・得意分野を検索できます）。", Left = 16, Top = 12, Width = 528, Height = 28 });
 
-            _list.SetBounds(16, 44, 528, 360);
+            _search.SetBounds(16, 44, 528, 30);
+            _search.TextChanged += (s, e) => Reload();
+            Controls.Add(_search);
+
+            _list.SetBounds(16, 80, 528, 324);
             _list.CheckOnClick = true;
+            _list.ItemCheck += (s, e) =>
+            {
+                if (_reloading)
+                {
+                    return;
+                }
+
+                var id = ((Item)_list.Items[e.Index]).Supplier.Id;
+                if (e.NewValue == CheckState.Checked)
+                {
+                    _checked.Add(id);
+                }
+                else
+                {
+                    _checked.Remove(id);
+                }
+            };
             Controls.Add(_list);
 
             _hint.SetBounds(250, 414, 294, 40);
@@ -63,6 +87,14 @@ namespace AnkenDesk.App
                         _list.SetItemChecked(i, true);
                     }
                 }
+
+                foreach (var id in _recent)
+                {
+                    if (!_already.Contains(id))
+                    {
+                        _checked.Add(id); // 検索で隠れている分も含める
+                    }
+                }
             };
             sameAsLast.Visible = _recent.Count > 0;
             Controls.Add(sameAsLast);
@@ -76,9 +108,9 @@ namespace AnkenDesk.App
             ok.Left = 288; ok.Top = 464;
             ok.Click += (s, e) =>
             {
-                foreach (var item in _list.CheckedItems)
+                foreach (var sup in _services.Db.ListSuppliers().Where(x => _checked.Contains(x.Id)))
                 {
-                    Chosen.Add(((Item)item).Supplier);
+                    Chosen.Add(sup);
                 }
 
                 DialogResult = DialogResult.OK;
@@ -94,15 +126,20 @@ namespace AnkenDesk.App
 
         private void Reload()
         {
+            _reloading = true;
             _list.Items.Clear();
+            var tokens = _search.Text.Split(new[] { ' ', '　' }, System.StringSplitOptions.RemoveEmptyEntries);
             var items = _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id))
+                .Where(x => tokens.All(t => (x.Name + " " + x.ShortName + " " + x.Specialty).IndexOf(t, System.StringComparison.OrdinalIgnoreCase) >= 0))
                 .Select(x => new Item { Supplier = x, Recent = _recent.Contains(x.Id) })
                 .OrderBy(i => i.Recent ? _recent.ToList().IndexOf(i.Supplier.Id) : int.MaxValue)
                 .ToList();
             foreach (var i in items)
             {
-                _list.Items.Add(i);
+                _list.Items.Add(i, _checked.Contains(i.Supplier.Id));
             }
+
+            _reloading = false;
 
             _hint.Text = _list.Items.Count == 0
                 ? "加えられる調達先がありません。「調達先マスター...」から登録してください。"

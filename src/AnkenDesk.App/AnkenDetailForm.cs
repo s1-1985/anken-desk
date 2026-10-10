@@ -31,6 +31,7 @@ namespace AnkenDesk.App
         private readonly ComboBox _statusBox = new ComboBox();
         private readonly PdfPreviewPanel _previewPanel = new PdfPreviewPanel { Visible = false };
         private bool _loadingStatus;
+        private Button _notesButton = new Button();
 
         // 経過の各行に対応する .msg のフルパス（無い行はnull）。行をダブルクリックして開く。
         private readonly List<string?> _historyMsg = new List<string?>();
@@ -112,17 +113,33 @@ namespace AnkenDesk.App
             var togglePreview = ToolButton("PDFプレビュー欄", false, 914, 156, 190);
             togglePreview.Click += (s, e) => TogglePreview();
 
-            _hint.SetBounds(16, 204, 1268, 24);
-            _hint.ForeColor = Color.FromArgb(90, 96, 100);
-            _hint.Text = "表の調達先の列にファイル（見積書のPDFなど）をドロップすると、「5.調達先見積もり」にコピーして保存します。";
+            // 5段目: メモ、過去の類似案件、提出単価と粗利、結果を入力
+            _notesButton = ToolButton("メモ", true, 16, 204, 170);
+            _notesButton.Click += (s, e) => OpenNotes();
+            var similar = ToolButton("過去の類似案件", false, 194, 204, 200);
+            similar.Click += (s, e) =>
+            {
+                using (var dlg = new SimilarForm(_services, _anken))
+                {
+                    dlg.ShowDialog(this);
+                }
+            };
+            var pricing = ToolButton("提出単価と粗利", false, 402, 204, 200);
+            pricing.Click += (s, e) => OpenPricing();
+            var result = ToolButton("結果を入力", false, 610, 204, 170);
+            result.Click += (s, e) => OpenResult();
 
-            var band = new Panel { Left = 16, Top = 232, Width = 1268, Height = 80, BackColor = Color.White };
+            _hint.SetBounds(16, 252, 1268, 24);
+            _hint.ForeColor = Color.FromArgb(90, 96, 100);
+            _hint.Text = "見積書のファイルは表の調達先の列へ。Outlookのメールは、この画面のどこへでもドロップできます（添付の取り込み・内容の記録）。";
+
+            var band = new Panel { Left = 16, Top = 280, Width = 1268, Height = 80, BackColor = Color.White };
             Place(band, "得意先・種別", _client, 0, 330);
             Place(band, "依頼日", _requestDate, 330, 180);
             Place(band, "回答期限", _dueDate, 510, 300);
             Place(band, "回答状況", _progress, 810, 450);
 
-            var bodyTop = 324;
+            var bodyTop = 372;
             var historyHeight = 100;
             var bodyHeight = height - bodyTop - historyHeight - 64;
 
@@ -174,9 +191,29 @@ namespace AnkenDesk.App
             _grid.AllowDrop = true;
             _grid.DragEnter += (s, e) =>
             {
-                e.Effect = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+                e.Effect = MailDrop.IsOutlookMail(e.Data) || (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) ? DragDropEffects.Copy : DragDropEffects.None;
             };
-            _grid.DragDrop += (s, e) => OnDropFiles(e);
+            _grid.DragDrop += (s, e) =>
+            {
+                if (MailDrop.IsOutlookMail(e.Data))
+                {
+                    BeginInvoke((Action)OpenDroppedMail);
+                    return;
+                }
+
+                OnDropFiles(e);
+            };
+
+            // 画面のどこにOutlookのメールを落としても、取り込み画面を開く（ファイルのドロップは、表の調達先の列だけ）
+            AllowDrop = true;
+            DragEnter += (s, e) => e.Effect = MailDrop.IsOutlookMail(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            DragDrop += (s, e) =>
+            {
+                if (MailDrop.IsOutlookMail(e.Data))
+                {
+                    BeginInvoke((Action)OpenDroppedMail);
+                }
+            };
 
             var historyTitle = new Label { Text = "経過", Left = 16, Top = height - historyHeight - 38, Width = 120, Height = 26, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) };
             historyTitle.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
@@ -188,7 +225,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Controls.Add(_previewPanel);
             _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
@@ -226,6 +263,8 @@ namespace AnkenDesk.App
             }
 
             _anken = a;
+            var notes = _services.Db.CountNotes(_ankenId);
+            _notesButton.Text = notes > 0 ? "メモ（" + notes + "件）" : "メモ";
             _loadingStatus = true;
             _statusBox.SelectedItem = a.Status;
             _loadingStatus = false;
@@ -287,6 +326,7 @@ namespace AnkenDesk.App
             }
 
             var cheapest = new HashSet<string>(Comparison.CheapestQuotes(quotes).Select(q => Key(q.PatternId, q.SupplierId)));
+            var breakdowns = _services.Db.ListBreakdowns(_ankenId);
 
             foreach (var p in patterns)
             {
@@ -296,7 +336,9 @@ namespace AnkenDesk.App
                 {
                     var q = quotes.FirstOrDefault(x => x.PatternId == p.Id && x.SupplierId == s.SupplierId);
                     var isCheapest = q != null && cheapest.Contains(Key(p.Id, s.SupplierId));
-                    cells.Add(QuoteText(q, s, isCheapest));
+                    IReadOnlyList<BreakdownLine>? bd;
+                    breakdowns.TryGetValue(new KeyValuePair<long, long>(s.SupplierId, p.Id), out bd);
+                    cells.Add(QuoteText(q, s, isCheapest, bd));
                     styles.Add(isCheapest);
                 }
 
@@ -316,7 +358,7 @@ namespace AnkenDesk.App
             return patternId + ":" + supplierId;
         }
 
-        private static string QuoteText(Quote? q, AnkenSupplier s, bool isCheapest)
+        private static string QuoteText(Quote? q, AnkenSupplier s, bool isCheapest, IReadOnlyList<BreakdownLine>? breakdown = null)
         {
             if (q == null)
             {
@@ -331,6 +373,13 @@ namespace AnkenDesk.App
 
             lines.Add(q.UnitPrice.HasValue ? Comparison.FormatPrice(q.UnitPrice.Value) : "単価なし");
             lines.Add(q.LeadTimeDays.HasValue ? "LT " + q.LeadTimeDays.Value + "日" : "LTなし");
+            if (breakdown != null && breakdown.Count > 0)
+            {
+                // 内訳の先頭の2行だけ。全部は「回答を入力・変更」の「内訳」で見られる。
+                var first = string.Join(" ", breakdown.Take(2).Select(b => b.Item + Comparison.FormatPrice(b.Amount)));
+                lines.Add("内訳: " + first + (breakdown.Count > 2 ? " ほか" + (breakdown.Count - 2) + "行" : ""));
+            }
+
             return string.Join("\r\n", lines);
         }
 
@@ -697,6 +746,12 @@ namespace AnkenDesk.App
 
                     var archived = string.Join("\n", moves.Select(m => Path.GetFileName(m.Value)));
                     _services.Db.SaveNewVersion(dlg.Answer, dlg.ResultQuotes, dlg.KeepHistory, archived);
+                    foreach (var q in dlg.ResultQuotes)
+                    {
+                        List<BreakdownLine>? lines;
+                        dlg.ResultBreakdowns.TryGetValue(q.PatternId, out lines);
+                        _services.Db.SaveBreakdown(dlg.Answer.AnkenId, dlg.Answer.SupplierId, q.PatternId, lines ?? new List<BreakdownLine>());
+                    }
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
                 {
@@ -800,6 +855,58 @@ namespace AnkenDesk.App
             {
                 Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
+        }
+
+        private void OpenNotes()
+        {
+            using (var dlg = new NotesForm(_services, _anken))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void OpenPricing()
+        {
+            if (_suppliers.Count == 0 || _services.Db.ListQuantities(_ankenId).Count == 0)
+            {
+                MessageBox.Show(this, "調達先と見積依頼数量が要ります。先に、調達先を加えて回答を入力してください。", "提出単価と粗利", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new PricingForm(_services, _anken))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    SetStatus("提出単価を保存しました");
+                }
+            }
+        }
+
+        private void OpenResult()
+        {
+            using (var dlg = new ResultForm(_services, _anken))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    SetStatus("結果を保存しました");
+                }
+            }
+
+            Reload();
+        }
+
+        // OutlookからドラッグしたメールをOutlookの選択から読んで、取り込み画面を開く。
+        // ドロップの処理の中でOutlookを呼ぶと、ドラッグが終わる前に待ち合わせが起きうるので、ドロップが終わってから開く。
+        private void OpenDroppedMail()
+        {
+            using (var dlg = new ImportMailForm(_services, _ankenId, true))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
         }
 
         // Esc: 閉じる（入力中のコンボなどが開いているときは、そちらが先に閉じる）

@@ -295,6 +295,41 @@ namespace AnkenDesk.Core.Tests
         }
     }
 
+    public class FileGroupDescriptorTests
+    {
+        private static byte[] Build(params string[] names)
+        {
+            var bytes = new byte[4 + names.Length * 592];
+            BitConverter.GetBytes(names.Length).CopyTo(bytes, 0);
+            for (var i = 0; i < names.Length; i++)
+            {
+                System.Text.Encoding.Unicode.GetBytes(names[i]).CopyTo(bytes, 4 + i * 592 + 72);
+            }
+
+            return bytes;
+        }
+
+        [Fact]
+        public void Reads_names_of_each_virtual_file()
+        {
+            var names = FileGroupDescriptor.FileNames(Build("御見積書【DUMMY-001】.msg", "二通目.MSG"));
+            Assert.Equal(new[] { "御見積書【DUMMY-001】.msg", "二通目.MSG" }, names.ToArray());
+            Assert.True(FileGroupDescriptor.HasMsg(Build("a.pdf", "b.msg")));
+            Assert.False(FileGroupDescriptor.HasMsg(Build("a.pdf")));
+        }
+
+        [Fact]
+        public void Broken_or_empty_data_gives_nothing_and_does_not_throw()
+        {
+            Assert.Empty(FileGroupDescriptor.FileNames(new byte[0]));
+            Assert.Empty(FileGroupDescriptor.FileNames(new byte[10]));
+            var lying = Build("a.msg");
+            BitConverter.GetBytes(99999).CopyTo(lying, 0); // 件数が大きすぎる
+            Assert.Single(FileGroupDescriptor.FileNames(lying));
+            Assert.False(FileGroupDescriptor.HasMsg(null!));
+        }
+    }
+
     public class InboundNoteTests
     {
         private static InboundMail Mail()

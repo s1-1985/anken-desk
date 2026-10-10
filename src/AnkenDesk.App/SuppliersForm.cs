@@ -15,6 +15,7 @@ namespace AnkenDesk.App
         private readonly TextBox _short = new TextBox();
         private readonly TextBox _email = new TextBox();
         private readonly TextBox _address = new TextBox();
+        private readonly TextBox _specialty = new TextBox();
 
         public SuppliersForm(AppServices services)
         {
@@ -32,13 +33,18 @@ namespace AnkenDesk.App
             AddField("略称（見積書PDFのファイル名に使います。空なら正式名）", _short, 340, 96);
             AddField("メールアドレス", _email, 340, 176);
             AddField("住所", _address, 340, 256);
+            AddField("得意分野（工法・材質など。空白で区切って複数。調達先を選ぶときの検索に使います）", _specialty, 340, 336);
 
             var add = UiStyle.CreateButton("追加", true, 120);
-            add.Left = 340; add.Top = 340;
-            add.Click += (s, e) => Run(() => _services.Db.AddSupplier(_name.Text, _short.Text, _email.Text, _address.Text));
+            add.Left = 340; add.Top = 420;
+            add.Click += (s, e) => Run(() =>
+            {
+                var created = _services.Db.AddSupplier(_name.Text, _short.Text, _email.Text, _address.Text);
+                _services.Db.SetSupplierSpecialty(created.Id, _specialty.Text);
+            });
 
             var update = UiStyle.CreateButton("選んだ調達先を更新", false, 200);
-            update.Left = 470; update.Top = 340;
+            update.Left = 470; update.Top = 420;
             update.Click += (s, e) => Run(() =>
             {
                 var sel = Selected();
@@ -47,10 +53,11 @@ namespace AnkenDesk.App
                 sel.Email = _email.Text;
                 sel.Address = _address.Text;
                 _services.Db.UpdateSupplier(sel);
+                _services.Db.SetSupplierSpecialty(sel.Id, _specialty.Text);
             });
 
             var delete = UiStyle.CreateButton("削除", false, 120);
-            delete.Left = 680; delete.Top = 340;
+            delete.Left = 680; delete.Top = 420;
             delete.Click += (s, e) => Run(() =>
             {
                 var sel = Selected();
@@ -67,7 +74,7 @@ namespace AnkenDesk.App
             close.Click += (s, e) => Close();
 
             var stats = UiStyle.CreateButton("調達先の実績を見る", false, 240);
-            stats.Left = 340; stats.Top = 400;
+            stats.Left = 340; stats.Top = 470;
             stats.Click += (s, e) => new SupplierStatsForm(_services).ShowDialog(this);
 
             Controls.AddRange(new Control[] { _list, add, update, delete, stats, close });
@@ -104,6 +111,7 @@ namespace AnkenDesk.App
             _short.Text = s.ShortName;
             _email.Text = s.Email;
             _address.Text = s.Address;
+            _specialty.Text = s.Specialty;
         }
 
         private void Run(Action action)
@@ -129,6 +137,7 @@ namespace AnkenDesk.App
             _short.Text = "";
             _email.Text = "";
             _address.Text = "";
+            _specialty.Text = "";
         }
     }
 }

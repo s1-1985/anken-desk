@@ -54,6 +54,8 @@ namespace AnkenDesk.App
         private readonly CheckBox _markReceived = new CheckBox();
         private readonly DateTimePicker _receivedDate = new DateTimePicker { Format = DateTimePickerFormat.Short };
         private readonly CheckBox _saveMsg = new CheckBox();
+        private readonly CheckBox _recordNote = new CheckBox();
+        private readonly bool _fromDrop;
         private readonly Label _hint = new Label();
         private readonly Button _import;
 
@@ -65,12 +67,14 @@ namespace AnkenDesk.App
         private InboundMail? _current;
         private bool _loading;
 
-        public ImportMailForm(AppServices services, long? preselectAnkenId)
+        /// <param name="fromDrop">Outlookからドラッグ&ドロップしたメール（Outlookで今選ばれているメール）を対象にする。</param>
+        public ImportMailForm(AppServices services, long? preselectAnkenId, bool fromDrop = false)
         {
             _services = services;
             _preselectAnkenId = preselectAnkenId;
+            _fromDrop = fromDrop;
             UiStyle.Apply(this);
-            Text = "受信メールから見積書を取り込む";
+            Text = fromDrop ? "ドロップしたメールを取り込む" : "受信メールから見積書を取り込む";
             var h = Math.Min(860, Screen.PrimaryScreen.WorkingArea.Height - 60);
             ClientSize = new Size(1280, h);
 
@@ -97,10 +101,10 @@ namespace AnkenDesk.App
 
             _onlyWithAttachment.SetBounds(612, 86, 220, 30);
             _onlyWithAttachment.Text = "添付があるメールだけ";
-            _onlyWithAttachment.Checked = true;
+            _onlyWithAttachment.Checked = !fromDrop; // ドロップしたメールは、添付が無くても内容を記録できる
             _onlyWithAttachment.CheckedChanged += (s, e) => ApplyFilter();
 
-            var reload = UiStyle.CreateButton("受信箱を読み込む", true, 220);
+            var reload = UiStyle.CreateButton(fromDrop ? "選んだメールを読み直す" : "受信箱を読み込む", true, 220);
             reload.Left = 1044; reload.Top = 80;
             reload.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             reload.Click += (s, e) => LoadMails();
@@ -197,6 +201,11 @@ namespace AnkenDesk.App
             _saveMsg.Text = "メール（.msg）も保存する";
             _saveMsg.Checked = true;
             p.Controls.Add(_saveMsg);
+            _recordNote.SetBounds(410, 98, 530, 24);
+            _recordNote.Text = "メールの内容（件名・差出人・本文）を、メモに残す";
+            _recordNote.Checked = true;
+            _recordNote.CheckedChanged += (s, e) => UpdateButtons();
+            p.Controls.Add(_recordNote);
             Controls.Add(p);
 
             _hint.SetBounds(16, h - 134, 800, 70);
@@ -233,13 +242,21 @@ namespace AnkenDesk.App
             var days = DaysSelected();
             try
             {
-                var mails = Background.Run<IReadOnlyList<InboundMail>>(this, "Outlookの受信箱を読んでいます。\r\nしばらくお待ちください。", () =>
+                var fromDrop = _fromDrop;
+                var mails = Background.Run<IReadOnlyList<InboundMail>>(this,
+                    fromDrop ? "Outlookで選んだメールを読んでいます。\r\nしばらくお待ちください。" : "Outlookの受信箱を読んでいます。\r\nしばらくお待ちください。", () =>
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return inbox.ListRecent(days, 300);
+                        return fromDrop ? inbox.GetSelected(30) : inbox.ListRecent(days, 300);
                     }
                 });
+                if (_fromDrop && mails.Count == 0)
+                {
+                    MessageBox.Show(this, "Outlookで選ばれているメールが見つかりませんでした。\r\nOutlookでメールを選んでから、もう一度ドロップするか、「選んだメールを読み直す」を押してください。",
+                        "ドロップしたメールを取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
                 _mails = mails.ToList();
             }
             catch (InvalidOperationException ex)
@@ -397,9 +414,9 @@ namespace AnkenDesk.App
                 problems.Add("取り込み先の調達先を選んでください。");
             }
 
-            if (_attachments.CheckedItems.Count == 0 && !_saveMsg.Checked)
+            if (_attachments.CheckedItems.Count == 0 && !_saveMsg.Checked && !_recordNote.Checked)
             {
-                problems.Add("取り込む添付ファイルを選ぶか、「メール（.msg）も保存する」にチェックを入れてください。");
+                problems.Add("取り込む添付ファイルを選ぶか、「メール（.msg）も保存する」「メールの内容をメモに残す」にチェックを入れてください。");
             }
 
             _hint.Text = problems.Count == 0 ? "選んだ内容で取り込めます。" : string.Join("\r\n", problems);
@@ -438,6 +455,7 @@ namespace AnkenDesk.App
             }
 
             var saveMsg = _saveMsg.Checked;
+            var recordNote = _recordNote.Checked;
             DateTime? received = _markReceived.Checked ? (DateTime?)_receivedDate.Value.Date : null;
             var full = Path.Combine(_services.WorkspaceRoot, anken.Anken.FolderPath);
 
@@ -459,6 +477,11 @@ namespace AnkenDesk.App
                 confirm.AppendLine("　・メール（.msg）→「" + InboundImporter.MailFolder + "」フォルダ");
             }
 
+            if (recordNote)
+            {
+                confirm.AppendLine("　・メールの内容 → メモ（" + supplier.Master.ShortName + "のメモとして）");
+            }
+
             confirm.AppendLine(received.HasValue ? "回答受領日: " + received.Value.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture) + " を入れる" : "回答受領日: 入れない");
             var ok = MessageBox.Show(this, confirm.ToString(), "取り込みの確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (ok != DialogResult.Yes)
@@ -476,7 +499,7 @@ namespace AnkenDesk.App
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return InboundImporter.Import(inbox, services.Db, ankenRec, full, master, mail, indexes, saveMsg, received, DateTime.Now);
+                        return InboundImporter.Import(inbox, services.Db, ankenRec, full, master, mail, indexes, saveMsg, received, DateTime.Now, recordNote);
                     }
                 });
             }
@@ -499,6 +522,11 @@ namespace AnkenDesk.App
             if (outcome.MsgPath != null)
             {
                 sb.AppendLine("メール（.msg）を保存しました。");
+            }
+
+            if (outcome.NoteRecorded)
+            {
+                sb.AppendLine("メールの内容を、メモに残しました。");
             }
 
             if (outcome.ReceivedDateMarked)

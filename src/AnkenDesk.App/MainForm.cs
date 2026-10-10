@@ -54,6 +54,33 @@ namespace AnkenDesk.App
             Controls.Add(BuildNav());
 
             KeyPreview = true;
+
+            // Outlookのメールを落とすと、取り込み画面を開く。一覧の行に落とせば、その案件を選んだ状態で開く。
+            AllowDrop = true;
+            _grid.AllowDrop = true;
+            DragEnter += (s, e) => e.Effect = MailDrop.IsOutlookMail(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            _grid.DragEnter += (s, e) => e.Effect = MailDrop.IsOutlookMail(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            DragDrop += (s, e) =>
+            {
+                if (MailDrop.IsOutlookMail(e.Data))
+                {
+                    BeginInvoke((Action)(() => OpenDroppedMail(null)));
+                }
+            };
+            _grid.DragDrop += (s, e) =>
+            {
+                if (!MailDrop.IsOutlookMail(e.Data))
+                {
+                    return;
+                }
+
+                var pt = _grid.PointToClient(new Point(e.X, e.Y));
+                var hit = _grid.HitTest(pt.X, pt.Y);
+                var row = hit.RowIndex >= 0 ? _grid.Rows[hit.RowIndex].Tag as HomeRow : null;
+                var ankenId = row == null ? (long?)null : row.Anken.Id;
+                BeginInvoke((Action)(() => OpenDroppedMail(ankenId)));
+            };
+
             _hoverTimer.Tick += (s, e) => ShowHover();
             _grid.CellMouseEnter += (s, e) =>
             {
@@ -420,6 +447,17 @@ namespace AnkenDesk.App
         private static string DayName(DateTime d)
         {
             return "日月火水木金土"[(int)d.DayOfWeek].ToString();
+        }
+
+        // ドロップのあとで（ドラッグが終わってから）、Outlookで選ばれているメールを取り込む画面を開く。
+        private void OpenDroppedMail(long? ankenId)
+        {
+            using (var dlg = new ImportMailForm(_services, ankenId, true))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
         }
 
         // ホーム一覧の行にマウスを置いて少し待つと、その案件の見積書の1ページ目を出す。
