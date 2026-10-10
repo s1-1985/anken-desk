@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -41,10 +42,22 @@ namespace AnkenDesk.App
         private readonly Label _pathLabel = new Label();
         private readonly Label _warn = new Label();
         private readonly Button _register;
+        private readonly ListBox _dropList = new ListBox();
+        private readonly List<string> _dropFiles = new List<string>();
 
-        public RegisterForm(AppServices services)
+        private readonly long? _templateAnkenId;
+        private readonly StagedClientMail? _staged;
+        private readonly Label _autoNote = new Label();
+        private bool _itemsTouched;
+        private bool _autoFill;
+
+        /// <param name="templateAnkenId">元にする案件（数量・項目・調達先を引き継ぐ。品番と備考は空にする）。</param>
+        /// <param name="staged">客先の依頼メール（取り出し済み）から登録する。依頼日・品番の候補・添付が入った状態で開く。</param>
+        public RegisterForm(AppServices services, long? templateAnkenId = null, StagedClientMail? staged = null)
         {
             _services = services;
+            _templateAnkenId = templateAnkenId;
+            _staged = staged;
             _registrar = services.CreateRegistrar();
             UiStyle.Apply(this);
             Text = "案件を登録";
@@ -52,7 +65,7 @@ namespace AnkenDesk.App
 
             var title = new Label
             {
-                Text = "案件を登録",
+                Text = templateAnkenId.HasValue ? "案件を登録（既存の案件を元に）" : "案件を登録",
                 Font = new Font("BIZ UDPGothic", 18F, FontStyle.Bold),
                 Left = 16, Top = 12, Width = 400, Height = 40,
             };
@@ -82,21 +95,49 @@ namespace AnkenDesk.App
             _register.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             _register.Click += (s, e) => DoRegister();
 
-            Controls.AddRange(new Control[] { title, left, right, cancel, _register });
+            _autoNote.SetBounds(440, 6, 724, 50);
+            _autoNote.ForeColor = Color.FromArgb(90, 96, 100);
+            Controls.AddRange(new Control[] { title, _autoNote, left, right, cancel, _register });
+            AcceptButton = _register;
+            CancelButton = cancel;
 
             _requestDate.Value = DateTime.Today;
             _dueDate.Value = DateTime.Today.AddDays(7);
             LoadClients();
             AddQuantityRow("試作", 1, "個/Lot");
-            foreach (var kv in _services.Db.GetItemDefaults())
+            foreach (var box in _items.Values)
             {
-                TextBox box;
-                if (_items.TryGetValue(kv.Key, out box))
+                box.TextChanged += (s, e) =>
                 {
-                    box.Text = kv.Value.Replace("\r\n", "\n").Replace("\n", "\r\n");
-                }
+                    if (!_autoFill)
+                    {
+                        _itemsTouched = true;
+                    }
+                };
             }
 
+            if (_templateAnkenId.HasValue)
+            {
+                ApplyTemplate(_templateAnkenId.Value);
+            }
+            else
+            {
+                ApplyItemsForClient();
+            }
+
+            if (_staged != null)
+            {
+                ApplyStagedMail(_staged);
+                FormClosed += (s, e) => _staged.Dispose();
+            }
+
+            _client.SelectedIndexChanged += (s, e) =>
+            {
+                if (!_templateAnkenId.HasValue)
+                {
+                    ApplyItemsForClient();
+                }
+            };
             _client.SelectedIndexChanged += (s, e) => UpdatePreview();
             _requestDate.ValueChanged += (s, e) => UpdatePreview();
             _part.TextChanged += (s, e) => UpdatePreview();
@@ -251,13 +292,52 @@ namespace AnkenDesk.App
             _warn.Font = new Font("BIZ UDPGothic", 11F, FontStyle.Bold);
             p.Controls.Add(_warn);
 
-            var list = new ListBox { Left = 0, Top = 204, Width = 388, Height = 330, IntegralHeight = false, SelectionMode = SelectionMode.None, TabStop = false };
+            var list = new ListBox { Left = 0, Top = 204, Width = 388, Height = 150, IntegralHeight = false, SelectionMode = SelectionMode.None, TabStop = false };
             list.Items.AddRange(FolderNames.Subfolders);
             p.Controls.Add(list);
 
+            p.Controls.Add(new Label { Text = "客先の依頼ファイル（ここへドロップ）", Left = 0, Top = 360, Width = 388, Height = 24 });
+            _dropList.SetBounds(0, 386, 388, 108);
+            _dropList.IntegralHeight = false;
+            _dropList.AllowDrop = true;
+            _dropList.DragEnter += (s, e) => e.Effect = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            _dropList.DragDrop += (s, e) =>
+            {
+                var dropped = e.Data == null ? null : e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (dropped != null)
+                {
+                    AddDropped(dropped);
+                }
+            };
+            p.Controls.Add(_dropList);
+
+            var addFile = UiStyle.CreateButton("ファイルを追加...", false, 190);
+            addFile.Left = 0; addFile.Top = 498;
+            addFile.Click += (s, e) =>
+            {
+                using (var dlg = new OpenFileDialog { Multiselect = true, Title = "客先の依頼ファイルを選ぶ" })
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        AddDropped(dlg.FileNames);
+                    }
+                }
+            };
+            var removeFile = UiStyle.CreateButton("選んだものを外す", false, 190);
+            removeFile.Left = 198; removeFile.Top = 498;
+            removeFile.Click += (s, e) =>
+            {
+                if (_dropList.SelectedIndex >= 0)
+                {
+                    _dropFiles.RemoveAt(_dropList.SelectedIndex);
+                    ShowDropped();
+                }
+            };
+            p.Controls.AddRange(new Control[] { addFile, removeFile });
+
             var root = new Label
             {
-                Left = 0, Top = 540, Width = 388, Height = 80,
+                Left = 0, Top = 546, Width = 388, Height = 80,
                 Text = "作成する場所:\r\n" + _services.WorkspaceRoot + (_services.IsDefaultWorkspace ? "（検証用のフォルダ）" : ""),
             };
             p.Controls.Add(root);
@@ -363,6 +443,114 @@ namespace AnkenDesk.App
             return problem;
         }
 
+        // 見積依頼書の項目を、同じ得意先・種別の直近の案件のものにする（無ければ既定値）。手で直した後は、上書きしない。
+        private void ApplyItemsForClient()
+        {
+            if (_itemsTouched)
+            {
+                return;
+            }
+
+            var client = _client.SelectedItem as Client;
+            var latest = client == null ? null : _services.Db.LatestAnkenOfClient(client.Id, 0);
+            var values = latest != null ? _services.Db.GetItems(latest.Id) : _services.Db.GetItemDefaults();
+            FillItems(values);
+            _autoNote.Text = latest != null
+                ? "見積依頼書の項目は、同じ得意先・種別の直近の案件（" + latest.PartNumber + "）のものを入れました。直してから登録できます。"
+                : "見積依頼書の項目は、既定値を入れました。";
+        }
+
+        private void FillItems(IReadOnlyDictionary<string, string> values)
+        {
+            _autoFill = true;
+            try
+            {
+                foreach (var kv in _items)
+                {
+                    string v;
+                    kv.Value.Text = values.TryGetValue(kv.Key, out v) ? v.Replace("\r\n", "\n").Replace("\n", "\r\n") : "";
+                }
+            }
+            finally
+            {
+                _autoFill = false;
+            }
+        }
+
+        // 客先の依頼メールから: 依頼日はメールの日付、品番は件名から拾った候補の先頭、添付は依頼ファイルの欄に入れる。
+        private void ApplyStagedMail(StagedClientMail staged)
+        {
+            _requestDate.Value = staged.Mail.ReceivedAt.Date;
+            _dueDate.Value = _requestDate.Value.AddDays(7);
+            var guesses = PartNumberGuess.FromSubject(staged.Mail.Subject);
+            if (guesses.Count > 0)
+            {
+                _part.Text = guesses[0];
+            }
+
+            AddDropped(staged.AttachmentPaths);
+            _autoNote.Text = "客先メール「" + staged.Mail.Subject + "」から登録します。"
+                + (guesses.Count > 0 ? "品番の候補: " + string.Join(" / ", guesses) + "（先頭を入れました。違えば直してください）。" : "件名から品番を拾えませんでした。品番を入力してください。")
+                + (staged.Errors.Count > 0 ? "　※一部取り出せませんでした: " + staged.Errors.Count + " 件" : "");
+            _part.Select();
+        }
+
+        // 元にする案件の、得意先・品名・数量・項目を入れる。品番と備考は新しく入力する。
+        private void ApplyTemplate(long ankenId)
+        {
+            var src = _services.Db.LoadAnkenInput(ankenId);
+            foreach (Client c in _client.Items)
+            {
+                if (c.Id == src.ClientId)
+                {
+                    _client.SelectedItem = c;
+                }
+            }
+
+            _partName.Text = src.PartName;
+            foreach (var r in _qtyList.ToList())
+            {
+                _qtyRows.Controls.Remove(r.Panel);
+                r.Panel.Dispose();
+            }
+
+            _qtyList.Clear();
+            foreach (var q in src.Quantities)
+            {
+                AddQuantityRow(q.Kind, q.Quantity, q.Unit);
+            }
+
+            FillItems(src.Items);
+            _itemsTouched = true;
+            _autoNote.Text = "「" + Home.Title(_services.Db.GetAnken(ankenId)!) + "」の数量・項目・調達先を引き継ぎました。品番と備考を入力してください。";
+            _part.Select();
+        }
+
+        // ---- 客先の依頼ファイル ----
+
+        private void AddDropped(IEnumerable<string> paths)
+        {
+            foreach (var path in paths)
+            {
+                if (File.Exists(path) && !_dropFiles.Contains(path, StringComparer.OrdinalIgnoreCase))
+                {
+                    _dropFiles.Add(path);
+                }
+            }
+
+            ShowDropped();
+        }
+
+        private void ShowDropped()
+        {
+            _dropList.Items.Clear();
+            foreach (var f in _dropFiles)
+            {
+                var name = Path.GetFileName(f);
+                _dropList.Items.Add(name + "　→　" + RequestFiles.TargetSubfolder(name));
+            }
+        }
+
         // ---- 登録 ----
 
         private void DoRegister()
@@ -401,7 +589,43 @@ namespace AnkenDesk.App
             try
             {
                 var rec = _registrar.Register(input);
-                MessageBox.Show(this, "登録しました。\r\n\r\n" + _registrar.FullPath(rec.FolderPath), "案件を登録", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (_templateAnkenId.HasValue)
+                {
+                    // 元の案件の調達先を、依頼前の状態（日付・単価なし）で加える。
+                    foreach (var sup in _services.Db.ListAnkenSuppliers(_templateAnkenId.Value))
+                    {
+                        _services.Db.AddSupplierToAnken(rec.Id, sup.SupplierId);
+                    }
+                }
+
+                var msg = "登録しました。\r\n\r\n" + _registrar.FullPath(rec.FolderPath);
+                var icon = MessageBoxIcon.Information;
+                if (_dropFiles.Count > 0)
+                {
+                    var copied = RequestFiles.CopyInto(_registrar.FullPath(rec.FolderPath), _dropFiles);
+                    var failed = copied.Where(c => c.Destination == null).ToList();
+                    ThumbnailService.WarmAsync(copied.Where(c => c.Destination != null).Select(c => c.Destination!)); // 画像を先に作っておく
+                    msg += "\r\n\r\n依頼ファイルを " + (copied.Count - failed.Count) + " 件コピーしました。";
+                    if (failed.Count > 0)
+                    {
+                        icon = MessageBoxIcon.Warning;
+                        msg += "\r\nコピーできなかったもの:\r\n" + string.Join("\r\n", failed.Select(f => Path.GetFileName(f.Source) + "（" + f.Error + "）"));
+                    }
+                }
+
+                if (_staged != null)
+                {
+                    // 客先メールの .msg を 1. へ、本文をメモへ、記録（種別「客先」）へ。添付は、上で振り分けてコピー済み。
+                    var recorded = ClientMailImporter.RecordStaged(_services.Db, rec, _registrar.FullPath(rec.FolderPath), _staged.Mail, _staged.MsgPath, _staged.Body, DateTime.Now);
+                    msg += "\r\n客先メールを記録しました" + (recorded.MsgPath != null ? "（.msg・" : "（") + (recorded.NoteRecorded ? "内容のメモ）。" : "）。");
+                    if (recorded.Errors.Count > 0)
+                    {
+                        icon = MessageBoxIcon.Warning;
+                        msg += "\r\n" + string.Join("\r\n", recorded.Errors);
+                    }
+                }
+
+                MessageBox.Show(this, msg, "案件を登録", MessageBoxButtons.OK, icon);
                 DialogResult = DialogResult.OK;
             }
             catch (DuplicateFolderException)

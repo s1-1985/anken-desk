@@ -14,28 +14,90 @@ namespace AnkenDesk.App
         private readonly CheckedListBox _list = new CheckedListBox();
         private readonly Label _hint = new Label();
 
+        private readonly IReadOnlyList<long> _recent;
+        private readonly TextBox _search = new TextBox();
+        private readonly HashSet<long> _checked = new HashSet<long>(); // 検索で絞っても、チェックを覚えておく
+        private bool _reloading;
+
         public List<Supplier> Chosen { get; } = new List<Supplier>();
 
-        public SupplierPickForm(AppServices services, IEnumerable<long> alreadyAdded)
+        // 一覧の1行。同じ得意先の直近の案件で依頼した調達先には「★前回」を付けて、先に並べる。
+        private sealed class Item
+        {
+            public Supplier Supplier = new Supplier();
+            public bool Recent;
+
+            public override string ToString()
+            {
+                return (Recent ? "★前回　" : "") + Supplier.Name + (string.IsNullOrWhiteSpace(Supplier.Specialty) ? "" : "　【" + Supplier.Specialty + "】");
+            }
+        }
+
+        /// <param name="recentSupplierIds">同じ得意先・種別の直近の案件の調達先（印を付けて先頭に出す）。</param>
+        public SupplierPickForm(AppServices services, IEnumerable<long> alreadyAdded, IReadOnlyList<long>? recentSupplierIds = null)
         {
             _services = services;
             _already = new HashSet<long>(alreadyAdded);
+            _recent = recentSupplierIds ?? new List<long>();
             UiStyle.Apply(this);
             Text = "調達先を加える";
             ClientSize = new Size(560, 520);
 
-            Controls.Add(new Label { Text = "この案件で見積を依頼する調達先を選んでください。", Left = 16, Top = 12, Width = 528, Height = 28 });
+            Controls.Add(new Label { Text = "見積を依頼する調達先を選んでください（下の欄で、名前・得意分野を検索できます）。", Left = 16, Top = 12, Width = 528, Height = 28 });
 
-            _list.SetBounds(16, 44, 528, 360);
+            _search.SetBounds(16, 44, 528, 30);
+            _search.TextChanged += (s, e) => Reload();
+            Controls.Add(_search);
+
+            _list.SetBounds(16, 80, 528, 324);
             _list.CheckOnClick = true;
-            _list.DisplayMember = "Name";
+            _list.ItemCheck += (s, e) =>
+            {
+                if (_reloading)
+                {
+                    return;
+                }
+
+                var id = ((Item)_list.Items[e.Index]).Supplier.Id;
+                if (e.NewValue == CheckState.Checked)
+                {
+                    _checked.Add(id);
+                }
+                else
+                {
+                    _checked.Remove(id);
+                }
+            };
             Controls.Add(_list);
 
-            _hint.SetBounds(16, 410, 528, 40);
+            _hint.SetBounds(250, 414, 294, 40);
             Controls.Add(_hint);
 
             var manage = UiStyle.CreateButton("調達先マスター...", false, 200);
             manage.Left = 16; manage.Top = 464;
+
+            var sameAsLast = UiStyle.CreateButton("★前回と同じを選ぶ", false, 220);
+            sameAsLast.Left = 16; sameAsLast.Top = 410 - 4;
+            sameAsLast.Click += (s, e) =>
+            {
+                for (var i = 0; i < _list.Items.Count; i++)
+                {
+                    if (((Item)_list.Items[i]).Recent)
+                    {
+                        _list.SetItemChecked(i, true);
+                    }
+                }
+
+                foreach (var id in _recent)
+                {
+                    if (!_already.Contains(id))
+                    {
+                        _checked.Add(id); // 検索で隠れている分も含める
+                    }
+                }
+            };
+            sameAsLast.Visible = _recent.Count > 0;
+            Controls.Add(sameAsLast);
             manage.Click += (s, e) =>
             {
                 new SuppliersForm(_services).ShowDialog(this);
@@ -46,9 +108,9 @@ namespace AnkenDesk.App
             ok.Left = 288; ok.Top = 464;
             ok.Click += (s, e) =>
             {
-                foreach (var item in _list.CheckedItems)
+                foreach (var sup in _services.Db.ListSuppliers().Where(x => _checked.Contains(x.Id)))
                 {
-                    Chosen.Add((Supplier)item);
+                    Chosen.Add(sup);
                 }
 
                 DialogResult = DialogResult.OK;
@@ -64,15 +126,24 @@ namespace AnkenDesk.App
 
         private void Reload()
         {
+            _reloading = true;
             _list.Items.Clear();
-            foreach (var s in _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id)))
+            var tokens = _search.Text.Split(new[] { ' ', '　' }, System.StringSplitOptions.RemoveEmptyEntries);
+            var items = _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id))
+                .Where(x => tokens.All(t => (x.Name + " " + x.ShortName + " " + x.Specialty).IndexOf(t, System.StringComparison.OrdinalIgnoreCase) >= 0))
+                .Select(x => new Item { Supplier = x, Recent = _recent.Contains(x.Id) })
+                .OrderBy(i => i.Recent ? _recent.ToList().IndexOf(i.Supplier.Id) : int.MaxValue)
+                .ToList();
+            foreach (var i in items)
             {
-                _list.Items.Add(s);
+                _list.Items.Add(i, _checked.Contains(i.Supplier.Id));
             }
+
+            _reloading = false;
 
             _hint.Text = _list.Items.Count == 0
                 ? "加えられる調達先がありません。「調達先マスター...」から登録してください。"
-                : "";
+                : (_recent.Count > 0 ? "★は、同じ得意先・種別の直近の案件で依頼した調達先です。" : "");
         }
     }
 }

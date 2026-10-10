@@ -13,6 +13,12 @@ namespace AnkenDesk.Core
 
         /// <summary>回答済み: 調達先が1社以上あり、全社が回答済みの案件。</summary>
         Answered,
+
+        /// <summary>今週期限: 要対応のうち、回答期限が今日から7日以内（期限超過も含む）。</summary>
+        DueThisWeek,
+
+        /// <summary>終了・保留: 受注・失注・保留にした案件。</summary>
+        Closed,
     }
 
     /// <summary>ホームの一覧の1行（1案件）。</summary>
@@ -31,9 +37,18 @@ namespace AnkenDesk.Core
         /// <summary>この案件に加えてある調達先の名前と略称（検索用）。</summary>
         public IReadOnlyList<string> SupplierNames { get; set; } = new List<string>();
 
+        /// <summary>見積依頼を送った（依頼送付日がある）のに、まだ回答が無い調達先。催促の相手。</summary>
+        public IReadOnlyList<long> RemindSupplierIds { get; set; } = new List<long>();
+
+        /// <summary>次の操作が「催促メールを作成」になる。</summary>
+        public bool CanRemind
+        {
+            get { return RemindSupplierIds.Count > 0; }
+        }
+
         public bool NeedsAction
         {
-            get { return Total > 0 && Answered < Total; }
+            get { return !AnkenStatus.IsClosed(Anken.Status) && Total > 0 && Answered < Total; }
         }
 
         public bool IsAnswered
@@ -46,6 +61,11 @@ namespace AnkenDesk.Core
         {
             get
             {
+                if (AnkenStatus.IsClosed(Anken.Status))
+                {
+                    return Anken.Status;
+                }
+
                 if (Total == 0)
                 {
                     return "依頼先なし";
@@ -100,6 +120,7 @@ namespace AnkenDesk.Core
                     Answered = list.Count(s => s.IsAnswered),
                     DaysToDue = (a.ReplyDueDate.Date - today.Date).Days,
                     PendingNames = list.Where(s => !s.IsAnswered).Select(s => s.ShortName).ToList(),
+                    RemindSupplierIds = list.Where(s => !s.IsAnswered && s.SentAt != null).Select(s => s.SupplierId).ToList(),
                     SupplierNames = list.SelectMany(s => new[] { s.SupplierName, s.ShortName }).Distinct().ToList(),
                 });
             }
@@ -145,7 +166,19 @@ namespace AnkenDesk.Core
             }
             else if (filter == HomeFilter.Answered)
             {
-                result = result.Where(r => r.IsAnswered);
+                result = result.Where(r => r.IsAnswered && !AnkenStatus.IsClosed(r.Anken.Status));
+            }
+            else if (filter == HomeFilter.DueThisWeek)
+            {
+                result = result.Where(r => r.NeedsAction && r.DaysToDue <= 7);
+            }
+            else if (filter == HomeFilter.Closed)
+            {
+                result = result.Where(r => AnkenStatus.IsClosed(r.Anken.Status));
+            }
+            else
+            {
+                // すべて
             }
 
             return result.Where(r => Matches(r, query)).ToList();
@@ -171,6 +204,42 @@ namespace AnkenDesk.Core
             fields.AddRange(row.SupplierNames);
 
             return tokens.All(t => fields.Any(f => f.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        /// <summary>
+        /// 催促が要る案件: 見積依頼を送ったのに未回答の調達先があり、回答期限が明日以前（期限超過も含む）。
+        /// 期限の近い順。
+        /// </summary>
+        public static IReadOnlyList<HomeRow> RemindCandidates(IEnumerable<HomeRow> rows)
+        {
+            return rows.Where(r => r.NeedsAction && r.CanRemind && r.DaysToDue <= 1)
+                .OrderBy(r => r.Anken.ReplyDueDate).ThenBy(r => r.Anken.Id).ToList();
+        }
+
+        /// <summary>状態の頭につける記号。色だけに頼らず、文字でも区別できるようにする（CLAUDE.md）。</summary>
+        public static string StatusMark(HomeRow r)
+        {
+            if (AnkenStatus.IsClosed(r.Anken.Status))
+            {
+                return "－ ";
+            }
+
+            if (r.IsAnswered)
+            {
+                return "○ ";
+            }
+
+            if (!r.NeedsAction)
+            {
+                return "・ ";
+            }
+
+            if (r.DaysToDue < 0)
+            {
+                return "▲ ";
+            }
+
+            return r.DaysToDue <= 1 ? "△ " : "□ ";
         }
 
         /// <summary>一覧に出す案件名: 「YYYYMMDD　品番」（備考があれば続けて）。</summary>

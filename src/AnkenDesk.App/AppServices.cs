@@ -11,12 +11,33 @@ namespace AnkenDesk.App
 
         public AnkenDb Db { get; }
 
+        /// <summary>DBと、DBの控えを置く場所。</summary>
+        public static string DataDir()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AnkenDesk");
+        }
+
         public AppServices()
         {
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AnkenDesk");
-            Db = new AnkenDb(Path.Combine(dir, "anken.db"));
+            var dbPath = Path.Combine(dir, "anken.db");
+
+            // 復元の予約があれば、DBを開く前に入れ替える（今のDBは「before-restore-…」として控えに残す）。
+            var backupDir = Path.Combine(dir, "backup");
+            try
+            {
+                DbBackup.ApplyPendingRestore(dbPath, backupDir, DateTime.Now);
+            }
+            catch (IOException)
+            {
+                // 入れ替えられなければ、今のDBのまま起動する（予約は残るので、次の起動でやり直す）。
+            }
+
+            // DBを開く前に、1日1回、控えを取る（失敗しても起動は続ける）。
+            DbBackup.CreateDaily(dbPath, backupDir, DateTime.Now);
+            Db = new AnkenDb(dbPath);
 
             // 初回は、本物のWork spaceではなくテスト用のフォルダにする（CLAUDE.md）。
             if (string.IsNullOrEmpty(Db.GetSetting(WorkspaceKey)))

@@ -47,6 +47,8 @@ namespace AnkenDesk.App
         private readonly DateTimePicker _due = new DateTimePicker { Format = DateTimePickerFormat.Short };
         private readonly CheckBox _signature = new CheckBox();
         private readonly TextBox _preview = new TextBox();
+        private readonly ComboBox _previewWho = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private bool _updatingWho;
         private readonly Label _problem = new Label();
         private readonly Button _send;
         private readonly Button _draft;
@@ -194,8 +196,16 @@ namespace AnkenDesk.App
             var p = new Panel { Left = 880, Top = 60, Width = 344, Height = h - 190, BackColor = Color.White };
             p.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             p.Controls.Add(Head("送るメールの見え方", 12, 8));
-            p.Controls.Add(new Label { Text = "（選んだ先頭の調達先の場合）", Left = 12, Top = 38, Width = 320, Height = 24 });
-            _preview.SetBounds(12, 66, 320, h - 190 - 78);
+            _previewWho.SetBounds(12, 38, 320, 28);
+            _previewWho.SelectedIndexChanged += (s, e) =>
+            {
+                if (!_updatingWho)
+                {
+                    UpdatePreview();
+                }
+            };
+            p.Controls.Add(_previewWho);
+            _preview.SetBounds(12, 74, 320, h - 190 - 86);
             _preview.Multiline = true;
             _preview.ReadOnly = true;
             _preview.ScrollBars = ScrollBars.Vertical;
@@ -287,13 +297,31 @@ namespace AnkenDesk.App
         private void UpdatePreview()
         {
             var selected = Selected();
+
+            // 見え方を見る調達先を選べるようにする（選んだ調達先が変わったときだけ、一覧を作り直す）。
+            var names = selected.Select(x => x.Master.Name).ToList();
+            if (!names.SequenceEqual(_previewWho.Items.Cast<string>()))
+            {
+                _updatingWho = true;
+                var keep = _previewWho.SelectedItem as string;
+                _previewWho.Items.Clear();
+                foreach (var n in names)
+                {
+                    _previewWho.Items.Add(n);
+                }
+
+                var at = keep == null ? -1 : names.IndexOf(keep);
+                _previewWho.SelectedIndex = names.Count == 0 ? -1 : Math.Max(0, at);
+                _updatingWho = false;
+            }
+
             if (selected.Count == 0)
             {
                 _preview.Text = "";
             }
             else
             {
-                var first = selected[0].Master;
+                var first = selected[Math.Max(0, _previewWho.SelectedIndex)].Master;
                 var sb = new StringBuilder();
                 sb.AppendLine("宛先: " + first.Email);
                 sb.AppendLine("件名: " + MailTemplates.Apply(_subject.Text, first, _anken, _due.Value.Date));

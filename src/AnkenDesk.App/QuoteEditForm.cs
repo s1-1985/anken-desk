@@ -16,6 +16,7 @@ namespace AnkenDesk.App
             public QuantityPattern Pattern = null!;
             public TextBox Price = null!;
             public TextBox LeadTime = null!;
+            public Button Breakdown = null!;
         }
 
         private readonly AppServices _services;
@@ -30,6 +31,15 @@ namespace AnkenDesk.App
         private readonly CheckBox _keep = new CheckBox();
         private readonly CheckBox _move = new CheckBox();
         private readonly Label _newFileLabel = new Label();
+
+        // 数量パターンごとの内訳（パターンID → 行）。空の行のないものは、内訳なし。
+        private readonly Dictionary<long, List<BreakdownLine>> _breakdowns = new Dictionary<long, List<BreakdownLine>>();
+
+        /// <summary>出し直しのとき、入力した内訳。呼び出し側が、新しい版の保存のあとで保存する。</summary>
+        public IReadOnlyDictionary<long, List<BreakdownLine>> ResultBreakdowns
+        {
+            get { return _breakdowns; }
+        }
 
         /// <summary>入力した回答（調達先ごとの項目）。</summary>
         public AnkenSupplier Answer
@@ -65,7 +75,7 @@ namespace AnkenDesk.App
             _requote = requote;
             UiStyle.Apply(this);
             Text = (requote ? "出し直しを受け取る: " : "回答を入力: ") + answer.SupplierName;
-            ClientSize = new Size(760, 640);
+            ClientSize = new Size(900, 640);
 
             Controls.Add(new Label
             {
@@ -74,13 +84,26 @@ namespace AnkenDesk.App
                 Left = 16, Top = 12, Width = 720, Height = 36,
             });
 
-            var table = new TableLayoutPanel { Left = 16, Top = 56, Width = 720, AutoSize = true, ColumnCount = 3 };
+            if (!requote)
+            {
+                foreach (var kv in _services.Db.ListBreakdowns(answer.AnkenId))
+                {
+                    if (kv.Key.Key == answer.SupplierId)
+                    {
+                        _breakdowns[kv.Key.Value] = kv.Value.ToList();
+                    }
+                }
+            }
+
+            var table = new TableLayoutPanel { Left = 16, Top = 56, Width = 860, AutoSize = true, ColumnCount = 4 };
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             table.Controls.Add(Head("数量"));
             table.Controls.Add(Head("単価（円）"));
             table.Controls.Add(Head("リードタイム（日）"));
+            table.Controls.Add(Head("内訳"));
             foreach (var p in patterns)
             {
                 var row = new Row { Pattern = p, Price = new TextBox { Width = 200 }, LeadTime = new TextBox { Width = 180 } };
@@ -91,10 +114,16 @@ namespace AnkenDesk.App
                     row.LeadTime.Text = q.LeadTimeDays.HasValue ? q.LeadTimeDays.Value.ToString(CultureInfo.InvariantCulture) : "";
                 }
 
+                row.Breakdown = new Button { Width = 130, Height = 32, FlatStyle = FlatStyle.Flat };
+                row.Breakdown.FlatAppearance.BorderColor = UiStyle.Primary;
+                var rowRef = row;
+                row.Breakdown.Click += (s, e) => EditBreakdown(rowRef);
+                ShowBreakdownText(row);
                 _rows.Add(row);
                 table.Controls.Add(new Label { Text = p.Kind + "　" + p.Quantity.ToString("#,##0.####", CultureInfo.InvariantCulture) + p.Unit, Width = 270, Height = 32, TextAlign = ContentAlignment.MiddleLeft });
                 table.Controls.Add(row.Price);
                 table.Controls.Add(row.LeadTime);
+                table.Controls.Add(row.Breakdown);
             }
 
             Controls.Add(table);
@@ -145,15 +174,53 @@ namespace AnkenDesk.App
                 bottom = ry + 104 + 48;
             }
 
-            ClientSize = new Size(760, Math.Max(640, bottom + 80));
+            ClientSize = new Size(900, Math.Max(640, bottom + 80));
 
             var save = UiStyle.CreateButton("保存", true, 140);
-            save.Left = 458; save.Top = ClientSize.Height - 56;
+            save.Left = 598; save.Top = ClientSize.Height - 56;
             save.Click += (s, e) => Save();
             var cancel = UiStyle.CreateButton("キャンセル", false, 140);
-            cancel.Left = 604; cancel.Top = ClientSize.Height - 56;
+            cancel.Left = 744; cancel.Top = ClientSize.Height - 56;
             cancel.Click += (s, e) => DialogResult = DialogResult.Cancel;
             Controls.AddRange(new Control[] { save, cancel });
+        }
+
+        private void ShowBreakdownText(Row row)
+        {
+            List<BreakdownLine>? lines;
+            var n = _breakdowns.TryGetValue(row.Pattern.Id, out lines) ? lines.Count : 0;
+            row.Breakdown.Text = n > 0 ? "内訳（" + n + "行）" : "内訳...";
+            row.Breakdown.Font = new Font("BIZ UDPGothic", 10.5F, n > 0 ? FontStyle.Bold : FontStyle.Regular);
+        }
+
+        // 内訳を入れる。合計を単価の欄に入れる（選んだとき）。
+        private void EditBreakdown(Row row)
+        {
+            List<BreakdownLine>? current;
+            _breakdowns.TryGetValue(row.Pattern.Id, out current);
+            var title = _answer.SupplierName + "　" + ExcelExports.PatternText(row.Pattern);
+            using (var dlg = new BreakdownForm(title, current ?? new List<BreakdownLine>()))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                if (dlg.Lines.Count == 0)
+                {
+                    _breakdowns.Remove(row.Pattern.Id);
+                }
+                else
+                {
+                    _breakdowns[row.Pattern.Id] = dlg.Lines;
+                    if (dlg.ApplySumToPrice)
+                    {
+                        row.Price.Text = dlg.Sum.ToString("0.####", CultureInfo.InvariantCulture);
+                    }
+                }
+            }
+
+            ShowBreakdownText(row);
         }
 
         private static Label Head(string text)
@@ -226,7 +293,7 @@ namespace AnkenDesk.App
 
             if (_requote)
             {
-                // 出し直しは、旧版のPDFの移動とDBの保存を、呼び出し側が順に行う。
+                // 出し直しは、旧版のPDFの移動とDBの保存を、呼び出し側が順に行う（内訳も、呼び出し側が保存する）。
                 ResultQuotes.Clear();
                 ResultQuotes.AddRange(quotes);
                 DialogResult = DialogResult.OK;
@@ -236,6 +303,13 @@ namespace AnkenDesk.App
             try
             {
                 _services.Db.SaveSupplierAnswer(_answer, quotes);
+                foreach (var r in _rows)
+                {
+                    List<BreakdownLine>? lines;
+                    _breakdowns.TryGetValue(r.Pattern.Id, out lines);
+                    _services.Db.SaveBreakdown(_answer.AnkenId, _answer.SupplierId, r.Pattern.Id, lines ?? new List<BreakdownLine>());
+                }
+
                 DialogResult = DialogResult.OK;
             }
             catch (InvalidOperationException ex)

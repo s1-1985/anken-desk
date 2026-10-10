@@ -49,6 +49,67 @@ namespace AnkenDesk.Core
 
         /// <summary>Work spaceからの相対パス（得意先・種別のフォルダ名\案件フォルダ名）。</summary>
         public string FolderPath { get; set; } = "";
+
+        /// <summary>案件の進み具合（<see cref="AnkenStatus"/>）。</summary>
+        public string Status { get; set; } = AnkenStatus.InProgress;
+
+        /// <summary>結果（受注・失注など）を入力した日。</summary>
+        public DateTime? ResultDate { get; set; }
+
+        /// <summary>結果のメモ（理由など）。</summary>
+        public string ResultNote { get; set; } = "";
+
+        /// <summary>採用された（発注先に決めた）調達先。</summary>
+        public long? AdoptedSupplierId { get; set; }
+
+        /// <summary>Outlookの予定表に入れた回答期限の予定のEntryID（入れていなければnull）。</summary>
+        public string? CalendarEntryId { get; set; }
+    }
+
+    /// <summary>見積の内訳の1行（材料費・加工費など）。</summary>
+    public sealed class BreakdownLine
+    {
+        public string Item { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>数量パターンごとの、客先への提出単価と、その元にした調達先。</summary>
+    public sealed class ClientPrice
+    {
+        public long PatternId { get; set; }
+        public decimal? SellingPrice { get; set; }
+        public long? AdoptedSupplierId { get; set; }
+    }
+
+    /// <summary>案件のメモ（調達先に紐づけることもできる）。メールの内容を記録したものは Source が "mail"。</summary>
+    public sealed class AnkenNote
+    {
+        public long Id { get; set; }
+        public long AnkenId { get; set; }
+        public long? SupplierId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public string Text { get; set; } = "";
+        public string Source { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 案件の進み具合。現行ExcelのSTATUSの選択肢が未確認（HANDOFF §8 #3）なので、仮の5つ【仮置き】。
+    /// 受注・失注・保留は「終わった／止めた」案件で、ホームの「要対応」に出さない。
+    /// </summary>
+    public static class AnkenStatus
+    {
+        public const string InProgress = "見積中";
+        public const string Submitted = "客先提出済み";
+        public const string Won = "受注";
+        public const string Lost = "失注";
+        public const string OnHold = "保留";
+
+        public static readonly string[] All = { InProgress, Submitted, Won, Lost, OnHold };
+
+        public static bool IsClosed(string status)
+        {
+            return status == Won || status == Lost || status == OnHold;
+        }
     }
 
     /// <summary>調達先（マスター）。略称は見積書PDFのファイル名に使う。</summary>
@@ -59,6 +120,9 @@ namespace AnkenDesk.Core
         public string ShortName { get; set; } = "";
         public string Email { get; set; } = "";
         public string Address { get; set; } = "";
+
+        /// <summary>得意分野（工法・材質など。空白や読点で区切って複数）。調達先を選ぶときの検索に使う。</summary>
+        public string Specialty { get; set; } = "";
     }
 
     /// <summary>案件に対して見積を依頼した調達先と、その回答のうち調達先ごとに1つの項目。</summary>

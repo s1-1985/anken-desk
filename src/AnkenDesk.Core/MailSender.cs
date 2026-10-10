@@ -135,6 +135,8 @@ namespace AnkenDesk.Core
                     return "催促";
                 case MailKind.Answer:
                     return "回答";
+                case MailKind.Client:
+                    return "客先";
                 default:
                     return "依頼";
             }

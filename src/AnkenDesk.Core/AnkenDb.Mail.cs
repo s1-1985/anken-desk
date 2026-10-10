@@ -47,7 +47,7 @@ namespace AnkenDesk.Core
                             Id = r.GetInt64(0),
                             AnkenId = ankenId,
                             SupplierId = r.IsDBNull(1) ? (long?)null : r.GetInt64(1),
-                            Kind = r.GetString(2) == "催促" ? MailKind.Reminder : (r.GetString(2) == "回答" ? MailKind.Answer : MailKind.Request),
+                            Kind = KindFromText(r.GetString(2)),
                             ToAddress = r.GetString(3),
                             Subject = r.GetString(4),
                             Status = r.GetString(5),
@@ -61,6 +61,74 @@ namespace AnkenDesk.Core
             }
 
             return list;
+        }
+
+        /// <summary>全案件のメールの記録（横断検索用）。</summary>
+        public IReadOnlyList<MailLogEntry> ListAllMailLog()
+        {
+            var list = new List<MailLogEntry>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT id, anken_id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at FROM mail_log ORDER BY created_at DESC, id DESC";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new MailLogEntry
+                        {
+                            Id = r.GetInt64(0),
+                            AnkenId = r.GetInt64(1),
+                            SupplierId = r.IsDBNull(2) ? (long?)null : r.GetInt64(2),
+                            Kind = KindFromText(r.GetString(3)),
+                            ToAddress = r.GetString(4),
+                            Subject = r.GetString(5),
+                            Status = r.GetString(6),
+                            EntryId = r.IsDBNull(7) ? null : r.GetString(7),
+                            SentAt = r.IsDBNull(8) ? (DateTime?)null : DateTime.ParseExact(r.GetString(8), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                            MsgPath = r.IsDBNull(9) ? null : r.GetString(9),
+                            CreatedAt = DateTime.ParseExact(r.GetString(10), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        private static MailKind KindFromText(string text)
+        {
+            switch (text)
+            {
+                case "催促":
+                    return MailKind.Reminder;
+                case "回答":
+                    return MailKind.Answer;
+                case "客先":
+                    return MailKind.Client;
+                default:
+                    return MailKind.Request;
+            }
+        }
+
+        /// <summary>取り込み済みのメール（回答・客先）のEntryID。受信メールの自動仕分けで、同じメールを二度出さないために使う。</summary>
+        public ISet<string> ListImportedEntryIds()
+        {
+            var set = new HashSet<string>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT entry_id FROM mail_log WHERE entry_id IS NOT NULL AND kind IN ('回答', '客先')";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        set.Add(r.GetString(0));
+                    }
+                }
+            }
+
+            return set;
         }
 
         /// <summary>見積依頼を送ったので、その調達先の「依頼送付日」を入れる。</summary>

@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 4;
+        private const int SchemaVersion = 7;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -257,7 +257,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path "
+                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status, a.result_date, a.result_note, a.adopted_supplier_id, a.calendar_entry_id "
                     + "FROM anken a JOIN client c ON c.id = a.client_id ORDER BY a.request_date DESC, a.id DESC";
                 using (var r = cmd.ExecuteReader())
                 {
@@ -274,6 +274,11 @@ namespace AnkenDesk.Core
                             Note = r.GetString(6),
                             ReplyDueDate = ParseDate(r.GetString(7)),
                             FolderPath = r.GetString(8),
+                            Status = r.GetString(9),
+                            ResultDate = r.IsDBNull(10) ? (DateTime?)null : ParseDate(r.GetString(10)),
+                            ResultNote = r.GetString(11),
+                            AdoptedSupplierId = r.IsDBNull(12) ? (long?)null : r.GetInt64(12),
+                            CalendarEntryId = r.IsDBNull(13) ? null : r.GetString(13),
                         });
                     }
                 }
@@ -435,6 +440,58 @@ namespace AnkenDesk.Core
                             + "kind TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL, "
                             + "entry_id TEXT, sent_at TEXT, msg_path TEXT, created_at TEXT NOT NULL)");
                         Exec(conn, tx, "PRAGMA user_version = 4");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 5)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // 案件の進み具合。外した調達先の控え（戻せるように、その時点の回答と単価を文字で残す）。
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN status TEXT NOT NULL DEFAULT '見積中'");
+                        Exec(conn, tx, "CREATE TABLE removed_supplier ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, anken_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, "
+                            + "sent_at TEXT, received_at TEXT, extra_cost TEXT NOT NULL, relaxation TEXT NOT NULL, note TEXT NOT NULL, "
+                            + "quotes TEXT NOT NULL, removed_at TEXT NOT NULL)");
+                        Exec(conn, tx, "PRAGMA user_version = 5");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 6)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // 結果入力、調達先の得意分野、メモ、見積の内訳、客先への提出単価。
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN result_date TEXT");
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN result_note TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN adopted_supplier_id INTEGER");
+                        Exec(conn, tx, "ALTER TABLE supplier ADD COLUMN specialty TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE removed_supplier ADD COLUMN breakdowns TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "CREATE TABLE anken_note ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, anken_id INTEGER NOT NULL REFERENCES anken(id), supplier_id INTEGER, "
+                            + "created_at TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL DEFAULT '')");
+                        Exec(conn, tx, "CREATE TABLE quote_breakdown ("
+                            + "anken_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pattern_id INTEGER NOT NULL REFERENCES quantity_pattern(id), "
+                            + "seq INTEGER NOT NULL, item TEXT NOT NULL, amount TEXT NOT NULL, "
+                            + "PRIMARY KEY (anken_id, supplier_id, pattern_id, seq), "
+                            + "FOREIGN KEY (anken_id, supplier_id) REFERENCES anken_supplier(anken_id, supplier_id) ON DELETE CASCADE)");
+                        Exec(conn, tx, "CREATE TABLE client_price ("
+                            + "anken_id INTEGER NOT NULL REFERENCES anken(id), pattern_id INTEGER NOT NULL REFERENCES quantity_pattern(id), "
+                            + "selling_price TEXT, adopted_supplier_id INTEGER, PRIMARY KEY (anken_id, pattern_id))");
+                        Exec(conn, tx, "PRAGMA user_version = 6");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 7)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // Outlookの予定表に入れた回答期限の予定（あとで更新・削除できるように、EntryIDを持つ）。
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN calendar_entry_id TEXT");
+                        Exec(conn, tx, "PRAGMA user_version = 7");
                         tx.Commit();
                     }
                 }
