@@ -49,6 +49,29 @@ namespace AnkenDesk.Core
 
         /// <summary>Work spaceからの相対パス（得意先・種別のフォルダ名\案件フォルダ名）。</summary>
         public string FolderPath { get; set; } = "";
+
+        /// <summary>案件の進み具合（<see cref="AnkenStatus"/>）。</summary>
+        public string Status { get; set; } = AnkenStatus.InProgress;
+    }
+
+    /// <summary>
+    /// 案件の進み具合。現行ExcelのSTATUSの選択肢が未確認（HANDOFF §8 #3）なので、仮の5つ【仮置き】。
+    /// 受注・失注・保留は「終わった／止めた」案件で、ホームの「要対応」に出さない。
+    /// </summary>
+    public static class AnkenStatus
+    {
+        public const string InProgress = "見積中";
+        public const string Submitted = "客先提出済み";
+        public const string Won = "受注";
+        public const string Lost = "失注";
+        public const string OnHold = "保留";
+
+        public static readonly string[] All = { InProgress, Submitted, Won, Lost, OnHold };
+
+        public static bool IsClosed(string status)
+        {
+            return status == Won || status == Lost || status == OnHold;
+        }
     }
 
     /// <summary>調達先（マスター）。略称は見積書PDFのファイル名に使う。</summary>

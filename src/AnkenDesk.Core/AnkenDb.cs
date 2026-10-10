@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 4;
+        private const int SchemaVersion = 5;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -257,7 +257,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path "
+                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status "
                     + "FROM anken a JOIN client c ON c.id = a.client_id ORDER BY a.request_date DESC, a.id DESC";
                 using (var r = cmd.ExecuteReader())
                 {
@@ -274,6 +274,7 @@ namespace AnkenDesk.Core
                             Note = r.GetString(6),
                             ReplyDueDate = ParseDate(r.GetString(7)),
                             FolderPath = r.GetString(8),
+                            Status = r.GetString(9),
                         });
                     }
                 }
@@ -435,6 +436,21 @@ namespace AnkenDesk.Core
                             + "kind TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL, "
                             + "entry_id TEXT, sent_at TEXT, msg_path TEXT, created_at TEXT NOT NULL)");
                         Exec(conn, tx, "PRAGMA user_version = 4");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 5)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // 案件の進み具合。外した調達先の控え（戻せるように、その時点の回答と単価を文字で残す）。
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN status TEXT NOT NULL DEFAULT '見積中'");
+                        Exec(conn, tx, "CREATE TABLE removed_supplier ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, anken_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, "
+                            + "sent_at TEXT, received_at TEXT, extra_cost TEXT NOT NULL, relaxation TEXT NOT NULL, note TEXT NOT NULL, "
+                            + "quotes TEXT NOT NULL, removed_at TEXT NOT NULL)");
+                        Exec(conn, tx, "PRAGMA user_version = 5");
                         tx.Commit();
                     }
                 }
