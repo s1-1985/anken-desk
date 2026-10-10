@@ -28,6 +28,9 @@ namespace AnkenDesk.App
         private readonly ListBox _folders = new ListBox();
         private readonly DataGridView _grid = new DataGridView();
         private readonly ListBox _history = new ListBox();
+        private readonly ComboBox _statusBox = new ComboBox();
+        private readonly PdfPreviewPanel _previewPanel = new PdfPreviewPanel { Visible = false };
+        private bool _loadingStatus;
 
         // 経過の各行に対応する .msg のフルパス（無い行はnull）。行をダブルクリックして開く。
         private readonly List<string?> _historyMsg = new List<string?>();
@@ -94,17 +97,32 @@ namespace AnkenDesk.App
                 }
             };
 
-            _hint.SetBounds(16, 156, 1268, 24);
+            // 4段目: 案件の状態、比較表のExcel、外した調達先を戻す、この案件を元に登録、プレビュー欄
+            var statusCaption = new Label { Text = "状態", Left = 16, Top = 164, Width = 50, Height = 28 };
+            _statusBox.SetBounds(68, 160, 170, 32);
+            _statusBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            _statusBox.Items.AddRange(AnkenStatus.All);
+            _statusBox.SelectedIndexChanged += (s, e) => ChangeAnkenStatus();
+            var exportXlsx = ToolButton("比較表をExcelに出力", false, 250, 156, 220);
+            exportXlsx.Click += (s, e) => ExportComparison();
+            var restore = ToolButton("外した調達先を戻す", false, 478, 156, 210);
+            restore.Click += (s, e) => RestoreRemovedSupplier();
+            var copyNew = ToolButton("この案件を元に登録", false, 696, 156, 210);
+            copyNew.Click += (s, e) => CopyAsNew();
+            var togglePreview = ToolButton("PDFプレビュー欄", false, 914, 156, 190);
+            togglePreview.Click += (s, e) => TogglePreview();
+
+            _hint.SetBounds(16, 204, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
             _hint.Text = "表の調達先の列にファイル（見積書のPDFなど）をドロップすると、「5.調達先見積もり」にコピーして保存します。";
 
-            var band = new Panel { Left = 16, Top = 184, Width = 1268, Height = 80, BackColor = Color.White };
+            var band = new Panel { Left = 16, Top = 232, Width = 1268, Height = 80, BackColor = Color.White };
             Place(band, "得意先・種別", _client, 0, 330);
             Place(band, "依頼日", _requestDate, 330, 180);
             Place(band, "回答期限", _dueDate, 510, 300);
             Place(band, "回答状況", _progress, 810, 450);
 
-            var bodyTop = 276;
+            var bodyTop = 324;
             var historyHeight = 100;
             var bodyHeight = height - bodyTop - historyHeight - 64;
 
@@ -170,8 +188,10 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
+            Controls.Add(_previewPanel);
+            _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
             Activated += (s, e) => Reload();
             Reload();
         }
@@ -206,6 +226,9 @@ namespace AnkenDesk.App
             }
 
             _anken = a;
+            _loadingStatus = true;
+            _statusBox.SelectedItem = a.Status;
+            _loadingStatus = false;
             _suppliers = _services.Db.ListAnkenSuppliers(_ankenId);
             var patterns = _services.Db.ListQuantities(_ankenId);
             var quotes = _services.Db.ListQuotes(_ankenId);
@@ -451,7 +474,7 @@ namespace AnkenDesk.App
 
         private void AddSuppliers()
         {
-            using (var dlg = new SupplierPickForm(_services, _suppliers.Select(s => s.SupplierId)))
+            using (var dlg = new SupplierPickForm(_services, _suppliers.Select(s => s.SupplierId), _services.Db.RecentSupplierIdsForClient(_anken.ClientId, _ankenId)))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK)
                 {
@@ -498,7 +521,7 @@ namespace AnkenDesk.App
             }
 
             var ok = MessageBox.Show(this,
-                "「" + s.SupplierName + "」をこの案件から外します。\r\n入力した単価・日付・備考と、旧版の履歴も消えます。\r\n（保存したPDFなどのファイルは消えません）",
+                "「" + s.SupplierName + "」をこの案件から外します。\r\n入力した単価・日付・備考は、あとで「外した調達先を戻す」で戻せます（旧版の履歴は戻りません）。\r\n保存したPDFなどのファイルは消えません。",
                 "調達先を外す", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (ok != DialogResult.Yes)
             {
@@ -523,6 +546,7 @@ namespace AnkenDesk.App
         private void SaveQuoteFiles(AnkenSupplier s, IEnumerable<string> paths)
         {
             var saved = new List<string>();
+            var savedPaths = new List<string>();
             var failed = new List<string>();
             foreach (var path in paths)
             {
@@ -534,7 +558,9 @@ namespace AnkenDesk.App
 
                 try
                 {
-                    saved.Add(Path.GetFileName(QuoteFiles.Save(AnkenFullPath(), s.ShortName, path)));
+                    var dest = QuoteFiles.Save(AnkenFullPath(), s.ShortName, path);
+                    saved.Add(Path.GetFileName(dest));
+                    savedPaths.Add(dest);
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException)
                 {
@@ -545,6 +571,7 @@ namespace AnkenDesk.App
             if (saved.Count > 0)
             {
                 SetStatus(s.ShortName + " の見積書を保存しました: " + string.Join("、", saved));
+                ThumbnailService.WarmAsync(savedPaths); // 画像を先に作っておく
             }
 
             if (failed.Count > 0)
@@ -553,6 +580,7 @@ namespace AnkenDesk.App
             }
 
             Reload();
+            UpdatePreviewPanel();
         }
 
         private void OnDropFiles(DragEventArgs e)
@@ -772,6 +800,161 @@ namespace AnkenDesk.App
             {
                 Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
+        }
+
+        // Esc: 閉じる（入力中のコンボなどが開いているときは、そちらが先に閉じる）
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape && !_statusBox.DroppedDown)
+            {
+                Close();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void ChangeAnkenStatus()
+        {
+            if (_loadingStatus || _statusBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            var status = (string)_statusBox.SelectedItem;
+            if (status == _anken.Status)
+            {
+                return;
+            }
+
+            if (AnkenStatus.IsClosed(status))
+            {
+                var ok = MessageBox.Show(this, "状態を「" + status + "」にします。\r\nホームの「要対応」には出なくなります（あとで戻せます）。",
+                    "案件の状態", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (ok != DialogResult.Yes)
+                {
+                    _loadingStatus = true;
+                    _statusBox.SelectedItem = _anken.Status;
+                    _loadingStatus = false;
+                    return;
+                }
+            }
+
+            _services.Db.SetAnkenStatus(_ankenId, status);
+            SetStatus("案件の状態を「" + status + "」にしました");
+            Reload();
+        }
+
+        // 比較表を、案件の「6.見積計算」にExcelで出力する。
+        private void ExportComparison()
+        {
+            if (_suppliers.Count == 0)
+            {
+                MessageBox.Show(this, "調達先が加えられていません。", "比較表をExcelに出力", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string path;
+            try
+            {
+                var dir = Path.Combine(AnkenFullPath(), FolderNames.Subfolders[5]);
+                Directory.CreateDirectory(dir);
+                path = QuoteFiles.UniquePath(dir, DateTime.Today.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + FolderNames.Separator + "比較表.xlsx");
+                ExcelExports.WriteComparison(path, _anken, _services.Db.ListQuantities(_ankenId), _suppliers, _services.Db.ListQuotes(_ankenId));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+            {
+                MessageBox.Show(this, "比較表を作れませんでした。\r\n\r\n" + ex.Message, "比較表をExcelに出力", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            SetStatus("比較表を出力しました: " + Path.GetFileName(path));
+            Reload();
+            if (MessageBox.Show(this, "比較表を「6.見積計算」に出力しました。\r\n\r\n" + path + "\r\n\r\nExcelで開きますか？",
+                    "比較表をExcelに出力", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
+        }
+
+        private void RestoreRemovedSupplier()
+        {
+            var removed = _services.Db.ListRemovedSuppliers(_ankenId);
+            if (removed.Count == 0)
+            {
+                MessageBox.Show(this, "戻せる調達先はありません。", "外した調達先を戻す", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var lines = removed.Select(r => r.SupplierName + "　（" + r.RemovedAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) + " に外した"
+                + (r.HadAnswer ? "・回答あり" : "") + "）").ToList();
+            using (var dlg = new PickListForm("外した調達先を戻す", "戻す調達先を選んでください。外した時点の日付・単価・備考ごと戻ります（旧版の履歴は戻りません）。", lines, "戻す"))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                var chosen = removed[dlg.SelectedIndexResult];
+                if (!_services.Db.RestoreRemovedSupplier(chosen.Id))
+                {
+                    MessageBox.Show(this, "戻せませんでした（すでに加え直してあります）。", "外した調達先を戻す", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    SetStatus("「" + chosen.SupplierName + "」を戻しました");
+                }
+            }
+
+            Reload();
+        }
+
+        // この案件の数量・項目・調達先を引き継いで、新しい案件の登録画面を開く。
+        private void CopyAsNew()
+        {
+            using (var dlg = new RegisterForm(_services, _ankenId))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    SetStatus("新しい案件を登録しました");
+                }
+            }
+        }
+
+        // PDFプレビュー欄の表示・非表示（表を狭めて右に出す）。
+        private void TogglePreview()
+        {
+            _previewPanel.Visible = !_previewPanel.Visible;
+            _grid.Width = _previewPanel.Visible ? 560 : 956;
+            if (_previewPanel.Visible)
+            {
+                _previewPanel.Left = _grid.Left + _grid.Width + 8;
+                _previewPanel.Top = _grid.Top;
+                _previewPanel.Size = new Size(1284 - _previewPanel.Left, _grid.Height);
+                _previewPanel.BringToFront();
+                UpdatePreviewPanel();
+            }
+        }
+
+        private void UpdatePreviewPanel()
+        {
+            if (!_previewPanel.Visible)
+            {
+                return;
+            }
+
+            var cell = _grid.CurrentCell;
+            var s = cell != null && cell.ColumnIndex > 0 ? _grid.Columns[cell.ColumnIndex].Tag as AnkenSupplier : null;
+            if (s == null)
+            {
+                _previewPanel.Clear("調達先の列を選ぶと、見積書（PDF）の1ページ目がここに出ます。");
+                return;
+            }
+
+            var pdf = QuoteFiles.ListCurrent(AnkenFullPath(), s.ShortName)
+                .Select(f => Path.Combine(QuoteFiles.QuoteDir(AnkenFullPath()), f))
+                .FirstOrDefault(f => string.Equals(Path.GetExtension(f), ".pdf", StringComparison.OrdinalIgnoreCase));
+            _previewPanel.ShowPdf(pdf, "「" + s.ShortName + "」の見積書（PDF）はまだありません。");
         }
 
         private void OpenFolder()

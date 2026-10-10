@@ -66,7 +66,11 @@ namespace AnkenDesk.App
             close.Left = 724; close.Top = 504;
             close.Click += (s, e) => Close();
 
-            Controls.AddRange(new Control[] { _list, add, update, delete, close });
+            var stats = UiStyle.CreateButton("調達先の実績を見る", false, 240);
+            stats.Left = 340; stats.Top = 400;
+            stats.Click += (s, e) => new SupplierStatsForm(_services).ShowDialog(this);
+
+            Controls.AddRange(new Control[] { _list, add, update, delete, stats, close });
             Reload();
         }
 

@@ -16,12 +16,11 @@ namespace AnkenDesk.App
     /// </summary>
     internal sealed class FileGalleryForm : Form
     {
-        private const int TileW = 190;
-        private const int TileH = 256; // ImageListの上限は256px
+        private const int TileW = ThumbnailService.TileW;
+        private const int TileH = ThumbnailService.TileH;
         private const int MaxFiles = 600;
 
         private readonly string _ankenFull;
-        private readonly ThumbnailCache _cache;
         private readonly ListView _list = new ListView();
         private readonly ImageList _images = new ImageList { ImageSize = new Size(TileW, TileH), ColorDepth = ColorDepth.Depth24Bit };
         private readonly ComboBox _folder = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -33,8 +32,6 @@ namespace AnkenDesk.App
         public FileGalleryForm(AppServices services, AnkenRecord anken)
         {
             _ankenFull = Path.Combine(services.WorkspaceRoot, anken.FolderPath);
-            _cache = new ThumbnailCache(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AnkenDesk", "thumbs"));
             UiStyle.Apply(this);
             Text = "ファイルを画像で見る　" + Home.Title(anken);
             var h = Math.Min(900, Screen.PrimaryScreen.WorkingArea.Height - 60);
@@ -141,7 +138,7 @@ namespace AnkenDesk.App
                 return;
             }
 
-            _cache.Prune(3000);
+            ThumbnailService.Cache.Prune(3000);
             var worker = new Thread(() => MakeAll(gen, files)) { IsBackground = true };
             worker.SetApartmentState(ApartmentState.MTA);
             worker.Start();
@@ -157,35 +154,9 @@ namespace AnkenDesk.App
                     return;
                 }
 
-                Bitmap bmp;
-                var note = "";
-                string cached;
-                try
-                {
-                    if (_cache.TryGet(files[i], TileW, out cached))
-                    {
-                        using (var ms = new MemoryStream(File.ReadAllBytes(cached)))
-                        using (var img = new Bitmap(ms))
-                        {
-                            bmp = new Bitmap(img);
-                        }
-                    }
-                    else
-                    {
-                        var made = ThumbnailMaker.Make(files[i], TileW, TileH);
-                        bmp = made.Image;
-                        note = made.Note;
-                        using (var ms = new MemoryStream())
-                        {
-                            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                            _cache.Store(files[i], TileW, ms.ToArray());
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException)
-                {
-                    bmp = ThumbnailMaker.Placeholder(Path.GetExtension(files[i]), TileW, TileH, "読めません").Image;
-                }
+                var made = ThumbnailService.GetOrMake(files[i], TileW, TileH);
+                var bmp = made.Image;
+                var note = made.Note;
 
                 var index = i;
                 var shown = bmp;

@@ -14,12 +14,28 @@ namespace AnkenDesk.App
         private readonly CheckedListBox _list = new CheckedListBox();
         private readonly Label _hint = new Label();
 
+        private readonly IReadOnlyList<long> _recent;
+
         public List<Supplier> Chosen { get; } = new List<Supplier>();
 
-        public SupplierPickForm(AppServices services, IEnumerable<long> alreadyAdded)
+        // 一覧の1行。同じ得意先の直近の案件で依頼した調達先には「★前回」を付けて、先に並べる。
+        private sealed class Item
+        {
+            public Supplier Supplier = new Supplier();
+            public bool Recent;
+
+            public override string ToString()
+            {
+                return (Recent ? "★前回　" : "") + Supplier.Name;
+            }
+        }
+
+        /// <param name="recentSupplierIds">同じ得意先・種別の直近の案件の調達先（印を付けて先頭に出す）。</param>
+        public SupplierPickForm(AppServices services, IEnumerable<long> alreadyAdded, IReadOnlyList<long>? recentSupplierIds = null)
         {
             _services = services;
             _already = new HashSet<long>(alreadyAdded);
+            _recent = recentSupplierIds ?? new List<long>();
             UiStyle.Apply(this);
             Text = "調達先を加える";
             ClientSize = new Size(560, 520);
@@ -28,14 +44,28 @@ namespace AnkenDesk.App
 
             _list.SetBounds(16, 44, 528, 360);
             _list.CheckOnClick = true;
-            _list.DisplayMember = "Name";
             Controls.Add(_list);
 
-            _hint.SetBounds(16, 410, 528, 40);
+            _hint.SetBounds(250, 414, 294, 40);
             Controls.Add(_hint);
 
             var manage = UiStyle.CreateButton("調達先マスター...", false, 200);
             manage.Left = 16; manage.Top = 464;
+
+            var sameAsLast = UiStyle.CreateButton("★前回と同じを選ぶ", false, 220);
+            sameAsLast.Left = 16; sameAsLast.Top = 410 - 4;
+            sameAsLast.Click += (s, e) =>
+            {
+                for (var i = 0; i < _list.Items.Count; i++)
+                {
+                    if (((Item)_list.Items[i]).Recent)
+                    {
+                        _list.SetItemChecked(i, true);
+                    }
+                }
+            };
+            sameAsLast.Visible = _recent.Count > 0;
+            Controls.Add(sameAsLast);
             manage.Click += (s, e) =>
             {
                 new SuppliersForm(_services).ShowDialog(this);
@@ -48,7 +78,7 @@ namespace AnkenDesk.App
             {
                 foreach (var item in _list.CheckedItems)
                 {
-                    Chosen.Add((Supplier)item);
+                    Chosen.Add(((Item)item).Supplier);
                 }
 
                 DialogResult = DialogResult.OK;
@@ -65,14 +95,18 @@ namespace AnkenDesk.App
         private void Reload()
         {
             _list.Items.Clear();
-            foreach (var s in _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id)))
+            var items = _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id))
+                .Select(x => new Item { Supplier = x, Recent = _recent.Contains(x.Id) })
+                .OrderBy(i => i.Recent ? _recent.ToList().IndexOf(i.Supplier.Id) : int.MaxValue)
+                .ToList();
+            foreach (var i in items)
             {
-                _list.Items.Add(s);
+                _list.Items.Add(i);
             }
 
             _hint.Text = _list.Items.Count == 0
                 ? "加えられる調達先がありません。「調達先マスター...」から登録してください。"
-                : "";
+                : (_recent.Count > 0 ? "★は、同じ得意先・種別の直近の案件で依頼した調達先です。" : "");
         }
     }
 }

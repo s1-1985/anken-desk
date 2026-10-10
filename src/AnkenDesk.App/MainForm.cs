@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -26,6 +27,12 @@ namespace AnkenDesk.App
         private readonly Button _tabNeeds = new Button();
         private readonly Button _tabAll = new Button();
         private readonly Button _tabAnswered = new Button();
+        private readonly Button _tabWeek = new Button();
+        private readonly Button _tabClosed = new Button();
+        private Button? _navRemind;
+        private readonly HoverPreview _hover = new HoverPreview();
+        private readonly System.Windows.Forms.Timer _hoverTimer = new System.Windows.Forms.Timer { Interval = 600 };
+        private int _hoverRow = -1;
         private readonly DataGridView _grid = new DataGridView();
         private readonly Label _empty = new Label();
         private readonly Label _workspace = new Label();
@@ -45,6 +52,36 @@ namespace AnkenDesk.App
 
             Controls.Add(BuildMain());
             Controls.Add(BuildNav());
+
+            KeyPreview = true;
+            _hoverTimer.Tick += (s, e) => ShowHover();
+            _grid.CellMouseEnter += (s, e) =>
+            {
+                _hoverTimer.Stop();
+                _hover.HidePreview();
+                _hoverRow = e.RowIndex;
+                if (e.RowIndex >= 0)
+                {
+                    _hoverTimer.Start();
+                }
+            };
+            _grid.MouseLeave += (s, e) =>
+            {
+                _hoverTimer.Stop();
+                _hover.HidePreview();
+                _hoverRow = -1;
+            };
+            _grid.MouseDown += (s, e) =>
+            {
+                _hoverTimer.Stop();
+                _hover.HidePreview();
+            };
+            Deactivate += (s, e) => _hover.HidePreview();
+            FormClosed += (s, e) =>
+            {
+                _hoverTimer.Stop();
+                _hover.Dispose();
+            };
 
             _search.TextChanged += (s, e) => Reload();
             Activated += (s, e) => Reload();
@@ -79,10 +116,12 @@ namespace AnkenDesk.App
                 NavButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)),
                 NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
                 NavButton("既存フォルダを取り込む", false, () => new ImportFolderForm(_services).ShowDialog(this)),
+                (_navRemind = NavButton("催促が必要な案件", false, () => OpenReminderBatch())),
+                NavButton("一覧をExcelに書き出す", false, () => ExportList()),
                 NavButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)),
                 NavButton("得意先・種別", false, () => new ClientsForm(_services).ShowDialog(this)),
                 NavButton("見積依頼書の既定値", false, () => new ItemDefaultsForm(_services).ShowDialog(this)),
-                NavButton("設定（Work spaceの場所）", false, () => new SettingsForm(_services).ShowDialog(this)),
+                NavButton("設定・DBの控え", false, () => new SettingsForm(_services).ShowDialog(this)),
             };
             var spacer = new Panel { Dock = DockStyle.Top, Height = 16 };
 
@@ -162,7 +201,7 @@ namespace AnkenDesk.App
                 Reload();
             };
 
-            var caption = new Label { Text = "検索（品番・日付・調達先）", Width = 320, Height = 22, Top = 0, ForeColor = Color.FromArgb(90, 96, 100) };
+            var caption = new Label { Text = "検索（品番・日付・調達先）　Ctrl+F", Width = 320, Height = 22, Top = 0, ForeColor = Color.FromArgb(90, 96, 100) };
             caption.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _search.Width = 320;
             _search.Top = 26;
@@ -213,14 +252,16 @@ namespace AnkenDesk.App
             SetupTab(_tabNeeds, HomeFilter.NeedsAction);
             SetupTab(_tabAll, HomeFilter.All);
             SetupTab(_tabAnswered, HomeFilter.Answered);
-            p.Controls.AddRange(new Control[] { _tabNeeds, _tabAll, _tabAnswered });
+            SetupTab(_tabWeek, HomeFilter.DueThisWeek);
+            SetupTab(_tabClosed, HomeFilter.Closed);
+            p.Controls.AddRange(new Control[] { _tabNeeds, _tabWeek, _tabAll, _tabAnswered, _tabClosed });
             return p;
         }
 
         private void SetupTab(Button b, HomeFilter filter)
         {
             b.Height = UiStyle.ButtonHeight;
-            b.Width = 150;
+            b.Width = 128;
             b.FlatStyle = FlatStyle.Flat;
             b.UseVisualStyleBackColor = false;
             b.FlatAppearance.BorderColor = UiStyle.Primary;
@@ -326,6 +367,14 @@ namespace AnkenDesk.App
             Tab(_tabNeeds, "要対応 " + Home.Filter(_allRows, HomeFilter.NeedsAction, null).Count, _filter == HomeFilter.NeedsAction);
             Tab(_tabAll, "すべて " + _allRows.Count, _filter == HomeFilter.All);
             Tab(_tabAnswered, "回答済み " + Home.Filter(_allRows, HomeFilter.Answered, null).Count, _filter == HomeFilter.Answered);
+            Tab(_tabWeek, "今週期限 " + Home.Filter(_allRows, HomeFilter.DueThisWeek, null).Count, _filter == HomeFilter.DueThisWeek);
+            Tab(_tabClosed, "終了・保留 " + Home.Filter(_allRows, HomeFilter.Closed, null).Count, _filter == HomeFilter.Closed);
+            if (_navRemind != null)
+            {
+                var n = Home.RemindCandidates(_allRows).Count;
+                _navRemind.Text = n > 0 ? "催促が必要な案件（" + n + "件）" : "催促が必要な案件";
+                _navRemind.Font = new Font("BIZ UDPGothic", 11F, n > 0 ? FontStyle.Bold : FontStyle.Regular);
+            }
 
             var rows = Home.Filter(_allRows, _filter, _search.Text);
             _grid.Rows.Clear();
@@ -337,7 +386,7 @@ namespace AnkenDesk.App
                     ? "調達先が未登録です"
                     : r.Answered + "/" + r.Total + "社" + (r.PendingNames.Count > 0 ? "\r\n未回答: " + string.Join("、", r.PendingNames) : "");
                 var idx = _grid.Rows.Add(
-                    r.StatusText,
+                    Home.StatusMark(r) + r.StatusText,
                     a.ReplyDueDate.ToString("MM/dd", CultureInfo.InvariantCulture) + "（" + DayName(a.ReplyDueDate) + "）",
                     a.ClientName,
                     title,
@@ -371,6 +420,113 @@ namespace AnkenDesk.App
         private static string DayName(DateTime d)
         {
             return "日月火水木金土"[(int)d.DayOfWeek].ToString();
+        }
+
+        // ホーム一覧の行にマウスを置いて少し待つと、その案件の見積書の1ページ目を出す。
+        private void ShowHover()
+        {
+            _hoverTimer.Stop();
+            if (_hoverRow < 0 || _hoverRow >= _grid.Rows.Count)
+            {
+                return;
+            }
+
+            var r = _grid.Rows[_hoverRow].Tag as HomeRow;
+            if (r == null)
+            {
+                return;
+            }
+
+            var file = HoverPreview.FindQuoteFile(Path.Combine(_services.WorkspaceRoot, r.Anken.FolderPath));
+            if (file != null)
+            {
+                _hover.ShowFor(file, Cursor.Position);
+            }
+        }
+
+        private void OpenReminderBatch()
+        {
+            var rows = Home.RemindCandidates(_allRows);
+            if (rows.Count == 0)
+            {
+                MessageBox.Show(this, "今、催促が必要な案件はありません。\r\n（見積依頼を送ったのに未回答の調達先があり、回答期限が明日以前の案件を出します）",
+                    "催促が必要な案件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new ReminderBatchForm(_services, rows))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
+        // 今の絞り込み結果を、Excelに書き出す。保存先は、保存画面で選ぶ。
+        private void ExportList()
+        {
+            var rows = Home.Filter(_allRows, _filter, _search.Text);
+            if (rows.Count == 0)
+            {
+                MessageBox.Show(this, "書き出す案件がありません。", "一覧をExcelに書き出す", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new SaveFileDialog
+            {
+                Title = "一覧をExcelに書き出す（今の絞り込み結果 " + rows.Count + " 件）",
+                Filter = "Excelブック (*.xlsx)|*.xlsx",
+                FileName = "案件一覧" + DateTime.Today.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + ".xlsx",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                OverwritePrompt = true,
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    ExcelExports.WriteAnkenList(dlg.FileName, rows);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    MessageBox.Show(this, "書き出せませんでした。\r\n（Excelで開いたままのときは、閉じてからやり直してください）\r\n\r\n" + ex.Message,
+                        "一覧をExcelに書き出す", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (MessageBox.Show(this, rows.Count + " 件を書き出しました。\r\n\r\n" + dlg.FileName + "\r\n\r\nExcelで開きますか？", "一覧をExcelに書き出す",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dlg.FileName) { UseShellExecute = true });
+                }
+            }
+        }
+
+        // Ctrl+F: 検索へ、Ctrl+N: 案件を登録、F5: 読み直し
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.F))
+            {
+                _search.Focus();
+                _search.SelectAll();
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.N))
+            {
+                new RegisterForm(_services).ShowDialog(this);
+                Reload();
+                return true;
+            }
+
+            if (keyData == Keys.F5)
+            {
+                Reload();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         // 見積依頼を送ったのに回答が無い調達先を選んだ状態で、催促メールの画面を開く。
