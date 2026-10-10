@@ -15,9 +15,11 @@ namespace AnkenDesk.Core.Tests
         public string Body = "本文のダミー";
         public bool FailBody;
 
-        public IReadOnlyList<InboundMail> ListRecent(int days, int maxCount)
+        public readonly List<InboundMail> SentMails = new List<InboundMail>();
+
+        public IReadOnlyList<InboundMail> ListRecent(int days, int maxCount, bool sent = false)
         {
-            return Mails;
+            return sent ? SentMails : Mails;
         }
 
         public void SaveAttachment(string entryId, int attachmentIndex, string path)

@@ -54,6 +54,45 @@ namespace AnkenDesk.Core
             return false;
         }
 
+        /// <summary>
+        /// 指定のサブフォルダ（<see cref="FolderNames.Subfolders"/> の番号）へ、そのままの名前でコピーする。
+        /// 同名は連番。1つの失敗で残りを止めない。「どこへ保存するか」を人が選ぶときに使う。
+        /// </summary>
+        public static IReadOnlyList<RequestFileResult> CopyToSubfolder(string ankenFullPath, int subfolderIndex, IEnumerable<string> sources)
+        {
+            if (subfolderIndex < 0 || subfolderIndex >= FolderNames.Subfolders.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(subfolderIndex));
+            }
+
+            var results = new List<RequestFileResult>();
+            foreach (var src in sources)
+            {
+                var r = new RequestFileResult { Source = src };
+                try
+                {
+                    if (!File.Exists(src))
+                    {
+                        throw new FileNotFoundException("ファイルが見つかりません。");
+                    }
+
+                    var dir = Path.Combine(ankenFullPath, FolderNames.Subfolders[subfolderIndex]);
+                    Directory.CreateDirectory(dir);
+                    var dest = QuoteFiles.UniquePath(dir, Path.GetFileName(src));
+                    File.Copy(src, dest, false);
+                    r.Destination = dest;
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    r.Error = ex.Message;
+                }
+
+                results.Add(r);
+            }
+
+            return results;
+        }
+
         /// <summary>案件フォルダへコピーする。1つの失敗で残りを止めない。</summary>
         public static IReadOnlyList<RequestFileResult> CopyInto(string ankenFullPath, IEnumerable<string> sources)
         {

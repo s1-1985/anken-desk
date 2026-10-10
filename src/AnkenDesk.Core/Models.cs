@@ -61,6 +61,9 @@ namespace AnkenDesk.Core
 
         /// <summary>採用された（発注先に決めた）調達先。</summary>
         public long? AdoptedSupplierId { get; set; }
+
+        /// <summary>Outlookの予定表に入れた回答期限の予定のEntryID（入れていなければnull）。</summary>
+        public string? CalendarEntryId { get; set; }
     }
 
     /// <summary>見積の内訳の1行（材料費・加工費など）。</summary>

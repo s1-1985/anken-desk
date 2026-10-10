@@ -61,6 +61,20 @@ namespace AnkenDesk.Core
             }
         }
 
+        /// <summary>
+        /// ファイル名から、どの調達先の見積書かを推定する。ファイル名に調達先の略称か正式名が入っていて、
+        /// それが1社だけに絞れたときだけ返す（複数・無しなら null。推測で保存しないため）。
+        /// </summary>
+        public static AnkenSupplier? GuessSupplier(string fileName, IEnumerable<AnkenSupplier> suppliers)
+        {
+            var name = fileName ?? "";
+            var found = suppliers
+                .Where(s => (s.ShortName.Length > 0 && name.IndexOf(s.ShortName, StringComparison.OrdinalIgnoreCase) >= 0)
+                            || (s.SupplierName.Length > 0 && name.IndexOf(s.SupplierName, StringComparison.OrdinalIgnoreCase) >= 0))
+                .ToList();
+            return found.Count == 1 ? found[0] : null;
+        }
+
         /// <summary>見積書を「5.調達先見積もり」へ<b>コピー</b>して保存する（元のファイルは動かさない）。保存した先のフルパスを返す。</summary>
         public static string Save(string ankenFullPath, string shortName, string sourcePath)
         {

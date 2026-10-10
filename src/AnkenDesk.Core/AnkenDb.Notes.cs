@@ -61,6 +61,34 @@ namespace AnkenDesk.Core
             return list;
         }
 
+        /// <summary>全案件のメモ（横断検索用）。</summary>
+        public IReadOnlyList<AnkenNote> ListAllNotes()
+        {
+            var list = new List<AnkenNote>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT id, anken_id, supplier_id, created_at, text, source FROM anken_note ORDER BY created_at DESC, id DESC";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new AnkenNote
+                        {
+                            Id = r.GetInt64(0),
+                            AnkenId = r.GetInt64(1),
+                            SupplierId = r.IsDBNull(2) ? (long?)null : r.GetInt64(2),
+                            CreatedAt = DateTime.ParseExact(r.GetString(3), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                            Text = r.GetString(4),
+                            Source = r.GetString(5),
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
         public void UpdateNote(long noteId, string text)
         {
             var t = (text ?? "").Trim();

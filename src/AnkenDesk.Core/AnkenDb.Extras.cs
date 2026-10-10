@@ -18,6 +18,19 @@ namespace AnkenDesk.Core
 
     public sealed partial class AnkenDb
     {
+        /// <summary>予定表の予定のEntryIDを記録する（nullで解除）。</summary>
+        public void SetCalendarEntryId(long ankenId, string? entryId)
+        {
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE anken SET calendar_entry_id = $e WHERE id = $id";
+                cmd.Parameters.AddWithValue("$e", (object?)entryId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$id", ankenId);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         public void SetAnkenStatus(long ankenId, string status)
         {
             if (!AnkenStatus.All.Contains(status))

@@ -150,7 +150,7 @@ namespace AnkenDesk.Core.Tests
                     conn.Open();
                     foreach (var sql in new[]
                     {
-                        "ALTER TABLE anken DROP COLUMN status", "ALTER TABLE anken DROP COLUMN result_date", "ALTER TABLE anken DROP COLUMN result_note",
+                        "ALTER TABLE anken DROP COLUMN calendar_entry_id", "ALTER TABLE anken DROP COLUMN status", "ALTER TABLE anken DROP COLUMN result_date", "ALTER TABLE anken DROP COLUMN result_note",
                         "ALTER TABLE anken DROP COLUMN adopted_supplier_id", "ALTER TABLE supplier DROP COLUMN specialty",
                         "DROP TABLE removed_supplier", "DROP TABLE anken_note", "DROP TABLE quote_breakdown", "DROP TABLE client_price",
                         "PRAGMA user_version = 4",

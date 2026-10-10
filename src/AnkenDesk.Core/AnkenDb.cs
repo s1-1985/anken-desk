@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 6;
+        private const int SchemaVersion = 7;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -257,7 +257,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status, a.result_date, a.result_note, a.adopted_supplier_id "
+                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status, a.result_date, a.result_note, a.adopted_supplier_id, a.calendar_entry_id "
                     + "FROM anken a JOIN client c ON c.id = a.client_id ORDER BY a.request_date DESC, a.id DESC";
                 using (var r = cmd.ExecuteReader())
                 {
@@ -278,6 +278,7 @@ namespace AnkenDesk.Core
                             ResultDate = r.IsDBNull(10) ? (DateTime?)null : ParseDate(r.GetString(10)),
                             ResultNote = r.GetString(11),
                             AdoptedSupplierId = r.IsDBNull(12) ? (long?)null : r.GetInt64(12),
+                            CalendarEntryId = r.IsDBNull(13) ? null : r.GetString(13),
                         });
                     }
                 }
@@ -480,6 +481,17 @@ namespace AnkenDesk.Core
                             + "anken_id INTEGER NOT NULL REFERENCES anken(id), pattern_id INTEGER NOT NULL REFERENCES quantity_pattern(id), "
                             + "selling_price TEXT, adopted_supplier_id INTEGER, PRIMARY KEY (anken_id, pattern_id))");
                         Exec(conn, tx, "PRAGMA user_version = 6");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 7)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // Outlookの予定表に入れた回答期限の予定（あとで更新・削除できるように、EntryIDを持つ）。
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN calendar_entry_id TEXT");
+                        Exec(conn, tx, "PRAGMA user_version = 7");
                         tx.Commit();
                     }
                 }

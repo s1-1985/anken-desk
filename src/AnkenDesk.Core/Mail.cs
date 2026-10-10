@@ -13,6 +13,9 @@ namespace AnkenDesk.Core
 
         /// <summary>調達先から届いた回答（受信メールの取り込み）。</summary>
         Answer,
+
+        /// <summary>客先とのやり取りのメール（依頼メール、問い合わせなど。受信・送信どちらも）。</summary>
+        Client,
     }
 
     /// <summary>送るメール1通。調達先ごとに別々のメールにする（調達先同士のアドレスを見せない。HANDOFF.md §3.4）。</summary>

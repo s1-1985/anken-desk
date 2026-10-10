@@ -23,14 +23,17 @@ namespace AnkenDesk.Core
         public string SenderName { get; set; } = "";
         public string SenderAddress { get; set; } = "";
         public DateTime ReceivedAt { get; set; }
+
+        /// <summary>送信済みアイテムのメール（受信日時は送信日時）。</summary>
+        public bool IsSent { get; set; }
         public List<InboundAttachment> Attachments { get; } = new List<InboundAttachment>();
     }
 
     /// <summary>Outlookの受信箱（実体は OutlookAccess）。画面やテストから差し替えられるようにしてある。</summary>
     public interface IMailInbox : IDisposable
     {
-        /// <summary>受信箱の、新しい方から。days日以内、最大 maxCount 通。</summary>
-        IReadOnlyList<InboundMail> ListRecent(int days, int maxCount);
+        /// <summary>受信箱（sent=true なら送信済みアイテム）の、新しい方から。days日以内、最大 maxCount 通。</summary>
+        IReadOnlyList<InboundMail> ListRecent(int days, int maxCount, bool sent = false);
 
         /// <summary>メールの添付ファイルを、指定のパスに保存する。</summary>
         void SaveAttachment(string entryId, int attachmentIndex, string path);
