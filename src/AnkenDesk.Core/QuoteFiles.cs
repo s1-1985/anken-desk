@@ -43,6 +43,8 @@ namespace AnkenDesk.Core
         /// <summary>同名のファイルがあれば「名前 (2).拡張子」「名前 (3).拡張子」…と連番を付けた、まだ無いパスを返す。</summary>
         public static string UniquePath(string dir, string fileName)
         {
+            // パスが長すぎて保存に失敗しないよう、名前を必要なだけ短くする（Windowsの上限）。
+            fileName = Sanitizer.FitFileName(dir, fileName);
             var path = Path.Combine(dir, fileName);
             if (!File.Exists(path) && !Directory.Exists(path))
             {

@@ -34,6 +34,43 @@ namespace AnkenDesk.Core
             return s;
         }
 
+        /// <summary>Windowsのパスの長さの上限（260）に、余裕をもたせた値。</summary>
+        public const int MaxPathLength = 250;
+
+        /// <summary>連番（" (99)"）を付けても収まるように空けておく長さ。</summary>
+        private const int SuffixReserve = 6;
+
+        /// <summary>
+        /// フォルダ <paramref name="dir"/> に <paramref name="fileName"/> で保存したときのパスが、Windowsの上限に収まるように、
+        /// 名前（拡張子の前）を短く切る。長いメールの件名や添付のファイル名で、保存に失敗しないようにするため。
+        /// 収まるときはそのまま返す。拡張子は残す。フォルダ自体が長すぎて収まらないときも、名前を可能な限り短くして返す（最低8文字）。
+        /// </summary>
+        public static string FitFileName(string dir, string fileName)
+        {
+            var allowed = MaxPathLength - (dir ?? "").TrimEnd('\\', '/').Length - 1 - SuffixReserve;
+            if (fileName.Length <= allowed)
+            {
+                return fileName;
+            }
+
+            var dot = fileName.LastIndexOf('.');
+            var ext = dot > 0 && fileName.Length - dot <= 10 ? fileName.Substring(dot) : "";
+            var stem = ext.Length > 0 ? fileName.Substring(0, dot) : fileName;
+            var keep = Math.Max(8, allowed - ext.Length);
+            if (keep >= stem.Length)
+            {
+                return fileName;
+            }
+
+            // 絵文字などのサロゲートペアの途中で切らない。
+            if (keep > 0 && char.IsHighSurrogate(stem[keep - 1]))
+            {
+                keep--;
+            }
+
+            return stem.Substring(0, keep).TrimEnd('.', ' ', '　') + ext;
+        }
+
         /// <summary>置き換えが要らない名前か（使えない文字・予約名・空でない）。</summary>
         public static bool IsValidName(string? name)
         {

@@ -183,19 +183,36 @@ namespace AnkenDesk.Core
             }
         }
 
-        /// <summary>取り込み済みのメール（回答・客先）のEntryID。受信メールの自動仕分けで、同じメールを二度出さないために使う。</summary>
+        /// <summary>メールを見分ける、件名と受信日時（分まで）の組。EntryIDは、メールをOutlookの別のフォルダへ動かすと変わるので、その備えに使う。</summary>
+        public static string ImportedKey(string subject, DateTime receivedAt)
+        {
+            return "KEY|" + (subject ?? "").Trim() + "|" + receivedAt.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 取り込み済みのメール（回答・客先）の目印。EntryIDと、<see cref="ImportedKey"/>（件名＋受信日時）の両方を入れる。
+        /// 受信メールの自動仕分けで、同じメールを二度出さないために使う。
+        /// </summary>
         public ISet<string> ListImportedEntryIds()
         {
             var set = new HashSet<string>();
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT entry_id FROM mail_log WHERE entry_id IS NOT NULL AND kind IN ('回答', '客先')";
+                cmd.CommandText = "SELECT entry_id, subject, sent_at FROM mail_log WHERE kind IN ('回答', '客先')";
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read())
                     {
-                        set.Add(r.GetString(0));
+                        if (!r.IsDBNull(0))
+                        {
+                            set.Add(r.GetString(0));
+                        }
+
+                        if (!r.IsDBNull(2))
+                        {
+                            set.Add(ImportedKey(r.GetString(1), DateTime.ParseExact(r.GetString(2), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)));
+                        }
                     }
                 }
             }

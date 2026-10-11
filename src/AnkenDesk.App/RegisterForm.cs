@@ -436,6 +436,11 @@ namespace AnkenDesk.App
                 {
                     problem = "同じ名前のフォルダが既にあります。備考などを変えてください。";
                 }
+                else if (_registrar.FullPath(rel).Length > 190)
+                {
+                    // この下に「5.調達先見積もり\メール\…」などが続くので、案件フォルダの時点で長いと、中のファイルが保存できなくなる。
+                    problem = "フォルダのパスが長すぎます（" + _registrar.FullPath(rel).Length + "文字。Windowsの制限のため、190文字以内に）。備考を短くしてください。";
+                }
             }
 
             _warn.Text = problem.Length == 0 ? "" : "警告: " + problem;

@@ -146,6 +146,30 @@ namespace AnkenDesk.Core.Tests
         }
 
         [Fact]
+        public void A_mail_moved_to_another_outlook_folder_is_still_recognised_as_imported()
+        {
+            using (var e = new Env())
+            {
+                var received = new DateTime(2026, 10, 6, 9, 30, 15);
+                e.Db.AddMailLog(new MailLogEntry
+                {
+                    AnkenId = e.A1.Id, SupplierId = e.S1.Id, Kind = MailKind.Answer, ToAddress = "kou@example.com", Subject = "御見積書 DUMMY-001",
+                    Status = "取り込み済み", EntryId = "OLD-ENTRY", SentAt = received, CreatedAt = DateTime.Now,
+                });
+                var imported = e.Db.ListImportedEntryIds();
+                Assert.Contains("OLD-ENTRY", imported);
+
+                // 移動してEntryIDが変わっても、件名と受信日時（分まで）で同じメールと分かる
+                var moved = new InboundMail { EntryId = "NEW-ENTRY", Subject = "御見積書 DUMMY-001", SenderAddress = "kou@example.com", ReceivedAt = received.AddSeconds(20) };
+                moved.Attachments.Add(new InboundAttachment { Index = 1, FileName = "見積.pdf" });
+                var other = new InboundMail { EntryId = "OTHER", Subject = "御見積書 DUMMY-001", SenderAddress = "kou@example.com", ReceivedAt = received.AddMinutes(5) };
+                other.Attachments.Add(new InboundAttachment { Index = 1, FileName = "見積2.pdf" });
+                var plan = InboundTriage.Plan(new[] { moved, other }, e.Db.ListAnkens(), e.Db.ListAllAnkenSuppliers(), e.Db.ListSuppliers(), imported);
+                Assert.Equal(new[] { "OTHER" }, plan.Select(p => p.Mail.EntryId).ToArray());
+            }
+        }
+
+        [Fact]
         public void Backfill_fills_only_missing_ids_and_counts_unavailable_ones()
         {
             using (var e = new Env())

@@ -269,7 +269,7 @@ namespace AnkenDesk.Core
             var result = new List<TriageProposal>();
             foreach (var m in mails)
             {
-                if (alreadyImported.Contains(m.EntryId))
+                if (alreadyImported.Contains(m.EntryId) || alreadyImported.Contains(AnkenDb.ImportedKey(m.Subject, m.ReceivedAt)))
                 {
                     continue;
                 }

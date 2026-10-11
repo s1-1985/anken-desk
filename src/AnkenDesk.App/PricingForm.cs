@@ -96,8 +96,8 @@ namespace AnkenDesk.App
                 }
 
                 var r = row;
-                row.Supplier.SelectedIndexChanged += (s, e) => FromSelling(r);
-                row.Selling.TextChanged += (s, e) => { if (!_busy) FromSelling(r); };
+                row.Supplier.SelectedIndexChanged += (s, e) => FromSelling(r, null);
+                row.Selling.TextChanged += (s, e) => { if (!_busy) FromSelling(r, r.Selling); };
                 row.Markup.TextChanged += (s, e) => { if (!_busy) FromMarkup(r); };
                 row.GrossRate.TextChanged += (s, e) => { if (!_busy) FromGrossRate(r); };
                 Controls.AddRange(new Control[] { row.Supplier, row.Cost, row.Selling, row.Markup, row.GrossRate, row.Profit });
@@ -142,7 +142,7 @@ namespace AnkenDesk.App
 
             foreach (var r in _rows)
             {
-                FromSelling(r);
+                FromSelling(r, null);
             }
         }
 
@@ -163,8 +163,9 @@ namespace AnkenDesk.App
             return q == null ? null : q.UnitPrice;
         }
 
-        // 提出単価が元: 仕入単価・掛け率・粗利率・粗利を出す。
-        private void FromSelling(Row r)
+        // 提出単価が元: 仕入単価・掛け率・粗利率・粗利を出す。いま入力中の欄（source）は、書き換えない
+        // （入力のたびに「12」が「12.0」に直されると、続きが打てなくなるため）。
+        private void FromSelling(Row r, Control? source)
         {
             _busy = true;
             try
@@ -174,16 +175,32 @@ namespace AnkenDesk.App
                 decimal selling;
                 if (!cost.HasValue || !TryNum(r.Selling.Text, out selling))
                 {
-                    r.Markup.Text = "";
-                    r.GrossRate.Text = "";
+                    if (source != r.Markup)
+                    {
+                        r.Markup.Text = "";
+                    }
+
+                    if (source != r.GrossRate)
+                    {
+                        r.GrossRate.Text = "";
+                    }
+
                     r.Profit.Text = cost.HasValue ? "" : "仕入単価がありません";
                     return;
                 }
 
                 var markup = AnkenDesk.Core.Margin.MarkupPercent(selling, cost.Value);
                 var rate = AnkenDesk.Core.Margin.GrossMarginPercent(selling, cost.Value);
-                r.Markup.Text = markup.HasValue ? markup.Value.ToString("0.0", CultureInfo.InvariantCulture) : "";
-                r.GrossRate.Text = rate.HasValue ? rate.Value.ToString("0.0", CultureInfo.InvariantCulture) : "";
+                if (source != r.Markup)
+                {
+                    r.Markup.Text = markup.HasValue ? markup.Value.ToString("0.0", CultureInfo.InvariantCulture) : "";
+                }
+
+                if (source != r.GrossRate)
+                {
+                    r.GrossRate.Text = rate.HasValue ? rate.Value.ToString("0.0", CultureInfo.InvariantCulture) : "";
+                }
+
                 var profit = AnkenDesk.Core.Margin.GrossProfit(selling, cost.Value);
                 r.Profit.Text = Comparison.FormatPrice(profit) + (profit < 0 ? "　赤字" : "");
                 r.Profit.ForeColor = profit < 0 ? UiStyle.Danger : UiStyle.Text;
@@ -206,7 +223,7 @@ namespace AnkenDesk.App
             _busy = true;
             r.Selling.Text = AnkenDesk.Core.Margin.SellingFromMarkup(cost.Value, m).ToString("0.####", CultureInfo.InvariantCulture);
             _busy = false;
-            FromSelling(r);
+            FromSelling(r, r.Markup);
         }
 
         private void FromGrossRate(Row r)
@@ -227,7 +244,7 @@ namespace AnkenDesk.App
             _busy = true;
             r.Selling.Text = selling.Value.ToString("0.####", CultureInfo.InvariantCulture);
             _busy = false;
-            FromSelling(r);
+            FromSelling(r, r.GrossRate);
         }
 
         private void Save()
