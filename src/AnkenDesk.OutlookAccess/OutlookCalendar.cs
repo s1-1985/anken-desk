@@ -154,6 +154,9 @@ namespace AnkenDesk.OutlookAccess
             public string Profile { get; set; } = "";
             public int InboxCount { get; set; }
             public int InboxUnread { get; set; }
+
+            /// <summary>受信箱の最新のメールから、会話ID（ConversationID）が取れたか。取れないと、返信の会話での仕分けは使えない。</summary>
+            public bool? ConversationIdAvailable { get; set; }
             public string Error { get; set; } = "";
         }
 
@@ -206,6 +209,37 @@ namespace AnkenDesk.OutlookAccess
                     inbox = ns.GetDefaultFolder(6);
                     result.InboxCount = (int)inbox.Items.Count;
                     result.InboxUnread = (int)inbox.UnReadItemCount;
+                    dynamic? items = inbox.Items;
+                    try
+                    {
+                        if ((int)items.Count > 0)
+                        {
+                            items.Sort("[ReceivedTime]", true);
+                            dynamic? first = items[1];
+                            try
+                            {
+                                result.ConversationIdAvailable = !string.IsNullOrEmpty((string)first.ConversationID);
+                            }
+                            finally
+                            {
+                                if (first != null && Marshal.IsComObject(first))
+                                {
+                                    Marshal.ReleaseComObject(first);
+                                }
+                            }
+                        }
+                    }
+                    catch (COMException)
+                    {
+                        result.ConversationIdAvailable = false;
+                    }
+                    finally
+                    {
+                        if (items != null && Marshal.IsComObject(items))
+                        {
+                            Marshal.ReleaseComObject(items);
+                        }
+                    }
                 }
                 catch (COMException)
                 {

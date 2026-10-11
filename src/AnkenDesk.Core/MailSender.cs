@@ -95,6 +95,7 @@ namespace AnkenDesk.Core
                     Subject = request.Subject,
                     Status = StatusText(result.Outcome),
                     EntryId = result.EntryId,
+                    ConversationId = result.ConversationId,
                     SentAt = result.SentAt,
                     MsgPath = result.MsgSaved ? Path.Combine(anken.FolderPath, FolderNames.Subfolders[3], Path.GetFileName(msgPath)) : null,
                     CreatedAt = now,

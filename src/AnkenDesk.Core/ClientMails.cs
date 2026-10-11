@@ -205,73 +205,177 @@ namespace AnkenDesk.Core
         }
     }
 
+    /// <summary>仕分けの確かさ。数字が大きいほど確か。</summary>
+    public enum TriageLevel
+    {
+        /// <summary>件名に品番があるだけ（差出人は、その案件の調達先と分からない）。人が確認する。</summary>
+        PartOnly = 1,
+
+        /// <summary>件名に品番があり、差出人がその案件の調達先のアドレスと同じ。</summary>
+        PartAndSender = 2,
+
+        /// <summary>送った依頼・催促メールと同じ会話（返信・その後のやり取り）。件名に品番が無くても、案件・調達先が決まる。</summary>
+        Thread = 3,
+    }
+
     /// <summary>受信メールの自動仕分けの1件。</summary>
     public sealed class TriageProposal
     {
         public InboundMail Mail { get; set; } = new InboundMail();
         public InboundCandidate Candidate { get; set; } = new InboundCandidate();
+        public TriageLevel Level { get; set; }
 
-        /// <summary>品番が件名にあり、差出人がその案件の調達先と一致する（確かな候補）。確かでないものは、人が確認する。</summary>
-        public bool Confident { get; set; }
+        /// <summary>最初からチェックしてよい確かさ（会話で結べた、または品番と差出人が合う）。確かでないものは、人が確認する。</summary>
+        public bool Confident
+        {
+            get { return Level >= TriageLevel.PartAndSender; }
+        }
 
-        /// <summary>取り込む添付の初期値（PDFとExcel。画像は除く。無ければ全部）。</summary>
+        /// <summary>見積書らしい添付（PDF・Excel）がある。回答受領日を入れる初期値の判断に使う（添付が無い返信は、まだ見積ではないことがある）。</summary>
+        public bool HasQuoteAttachment { get; set; }
+
+        /// <summary>取り込む添付の初期値（PDFとExcel。画像は除く。無ければ全部。添付が無ければ空）。</summary>
         public List<int> AttachmentIndexes { get; } = new List<int>();
     }
 
     public static class InboundTriage
     {
-        /// <summary>確かな候補の点数（品番 100 + 調達先のアドレス 20）。</summary>
+        /// <summary>品番＋調達先のアドレスの点数（品番 100 + 調達先のアドレス 20）。</summary>
         public const int ConfidentScore = 120;
 
-        /// <summary>件名に品番が入っている点数。これ未満は、仕分けの候補に出さない。</summary>
+        /// <summary>件名に品番が入っている点数。これ未満は、会話で結べないメールの仕分けの候補に出さない。</summary>
         public const int PartMatchScore = 100;
 
         private static readonly string[] Wanted = { ".pdf", ".xlsx", ".xlsm", ".xls" };
 
         /// <summary>
-        /// 受信メールを、案件・調達先ごとに仕分ける。取り込み済み（EntryIDが記録にある）のメール、添付の無いメール、
-        /// 終わった案件（受注・失注・保留）への候補、件名に品番が入っていないメールは出さない。確かな候補（<see cref="TriageProposal.Confident"/>）を先に、
-        /// 受信日時の新しい順。
+        /// 受信メールを、案件・調達先ごとに仕分ける。
+        /// 1) 送った依頼・催促と同じ会話のメール（<paramref name="conversations"/>）は、添付が無くても、終わった案件でも出す（確かさ: 会話）。
+        /// 2) それ以外は、添付があり、件名に案件の品番が入っているものだけ（差出人が調達先なら「確実」、品番だけなら「要確認」）。
+        ///    終わった案件（受注・失注・保留）は出さない。差出人が調達先というだけでは、別件のメールも拾うので出さない。
+        /// 取り込み済み（EntryIDが記録にある）のメールは出さない。確かな順、受信日時の新しい順。
         /// </summary>
         public static IReadOnlyList<TriageProposal> Plan(
             IEnumerable<InboundMail> mails,
             IEnumerable<AnkenRecord> ankens,
             IReadOnlyDictionary<long, IReadOnlyList<AnkenSupplier>> ankenSuppliers,
             IEnumerable<Supplier> suppliers,
-            ISet<string> alreadyImported)
+            ISet<string> alreadyImported,
+            IReadOnlyDictionary<string, ConversationLink>? conversations = null)
         {
-            var open = ankens.Where(a => !AnkenStatus.IsClosed(a.Status)).ToList();
+            var all = ankens.ToList();
+            var open = all.Where(a => !AnkenStatus.IsClosed(a.Status)).ToList();
             var sup = suppliers.ToList();
             var result = new List<TriageProposal>();
             foreach (var m in mails)
             {
-                if (m.Attachments.Count == 0 || alreadyImported.Contains(m.EntryId))
+                if (alreadyImported.Contains(m.EntryId))
                 {
                     continue;
                 }
 
-                // 件名に案件の品番が入っているものだけ。差出人が調達先というだけでは、別件のメールも拾うので出さない。
+                var threaded = ByConversation(m, all, ankenSuppliers, conversations);
+                if (threaded != null)
+                {
+                    result.Add(Build(m, threaded, TriageLevel.Thread));
+                    continue;
+                }
+
+                if (m.Attachments.Count == 0)
+                {
+                    continue;
+                }
+
+                // 件名に案件の品番が入っているものだけ。
                 var cand = InboundMatcher.Suggest(m, open, ankenSuppliers, sup).FirstOrDefault();
                 if (cand == null || cand.Score < PartMatchScore)
                 {
                     continue;
                 }
 
-                var p = new TriageProposal { Mail = m, Candidate = cand, Confident = cand.Supplier != null && cand.Score >= ConfidentScore };
-                foreach (var a in m.Attachments.Where(a => Wanted.Contains(Path.GetExtension(a.FileName).ToLowerInvariant())))
-                {
-                    p.AttachmentIndexes.Add(a.Index);
-                }
-
-                if (p.AttachmentIndexes.Count == 0)
-                {
-                    p.AttachmentIndexes.AddRange(m.Attachments.Select(a => a.Index));
-                }
-
-                result.Add(p);
+                result.Add(Build(m, cand, cand.Supplier != null && cand.Score >= ConfidentScore ? TriageLevel.PartAndSender : TriageLevel.PartOnly));
             }
 
-            return result.OrderByDescending(r => r.Confident).ThenByDescending(r => r.Mail.ReceivedAt).ToList();
+            return result.OrderByDescending(r => r.Level).ThenByDescending(r => r.Mail.ReceivedAt).ToList();
+        }
+
+        private static InboundCandidate? ByConversation(
+            InboundMail m, List<AnkenRecord> all, IReadOnlyDictionary<long, IReadOnlyList<AnkenSupplier>> ankenSuppliers,
+            IReadOnlyDictionary<string, ConversationLink>? conversations)
+        {
+            ConversationLink? link;
+            if (conversations == null || string.IsNullOrEmpty(m.ConversationId) || !conversations.TryGetValue(m.ConversationId, out link))
+            {
+                return null;
+            }
+
+            var anken = all.FirstOrDefault(a => a.Id == link.AnkenId);
+            IReadOnlyList<AnkenSupplier>? list;
+            if (anken == null || !ankenSuppliers.TryGetValue(anken.Id, out list))
+            {
+                return null;
+            }
+
+            var s = list.FirstOrDefault(x => x.SupplierId == link.SupplierId);
+            return s == null ? null : new InboundCandidate { Anken = anken, Supplier = s, Score = 1000 };
+        }
+
+        private static TriageProposal Build(InboundMail m, InboundCandidate cand, TriageLevel level)
+        {
+            var p = new TriageProposal { Mail = m, Candidate = cand, Level = level };
+            foreach (var a in m.Attachments.Where(a => Wanted.Contains(Path.GetExtension(a.FileName).ToLowerInvariant())))
+            {
+                p.AttachmentIndexes.Add(a.Index);
+            }
+
+            p.HasQuoteAttachment = p.AttachmentIndexes.Count > 0;
+            if (p.AttachmentIndexes.Count == 0)
+            {
+                p.AttachmentIndexes.AddRange(m.Attachments.Select(a => a.Index));
+            }
+
+            return p;
+        }
+    }
+
+    /// <summary>送った依頼・催促のメールの記録に、Outlookの会話IDを補う（このバージョンより前に送ったメール用）。</summary>
+    public static class ConversationBackfill
+    {
+        public sealed class Result
+        {
+            public int Updated { get; set; }
+
+            /// <summary>Outlookにメールが見つからない・会話IDが空だったもの。</summary>
+            public int Missing { get; set; }
+        }
+
+        /// <summary>会話IDが無い送信済みの記録を、EntryIDからOutlookに問い合わせて補う。1通の失敗で、ほかを止めない。</summary>
+        public static Result Run(IMailInbox inbox, AnkenDb db)
+        {
+            var result = new Result();
+            foreach (var m in db.ListMailsMissingConversation())
+            {
+                string? conv = null;
+                try
+                {
+                    conv = inbox.GetConversationId(m.Value);
+                }
+                catch (Exception ex) when (!(ex is OutOfMemoryException))
+                {
+                    conv = null;
+                }
+
+                if (string.IsNullOrEmpty(conv))
+                {
+                    result.Missing++;
+                    continue;
+                }
+
+                db.SetMailConversationId(m.Key, conv!);
+                result.Updated++;
+            }
+
+            return result;
         }
     }
 }

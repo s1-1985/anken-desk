@@ -343,7 +343,7 @@ namespace AnkenDesk.Core.Tests
                 using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + path))
                 {
                     conn.Open();
-                    foreach (var sql in new[] { "ALTER TABLE anken DROP COLUMN calendar_entry_id", "PRAGMA user_version = 6" })
+                    foreach (var sql in new[] { "DROP INDEX idx_mail_log_conversation", "ALTER TABLE mail_log DROP COLUMN conversation_id", "ALTER TABLE anken DROP COLUMN calendar_entry_id", "PRAGMA user_version = 6" })
                     {
                         using (var cmd = conn.CreateCommand())
                         {

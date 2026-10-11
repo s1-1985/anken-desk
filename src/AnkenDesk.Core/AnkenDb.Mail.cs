@@ -12,8 +12,9 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "INSERT INTO mail_log (anken_id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at) "
-                    + "VALUES ($a, $s, $k, $to, $sub, $st, $eid, $sent, $msg, $at)";
+                cmd.CommandText = "INSERT INTO mail_log (anken_id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at, conversation_id) "
+                    + "VALUES ($a, $s, $k, $to, $sub, $st, $eid, $sent, $msg, $at, $conv)";
+                cmd.Parameters.AddWithValue("$conv", (object?)e.ConversationId ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("$a", e.AnkenId);
                 cmd.Parameters.AddWithValue("$s", e.SupplierId.HasValue ? (object)e.SupplierId.Value : DBNull.Value);
                 cmd.Parameters.AddWithValue("$k", MailSender.KindText(e.Kind));
@@ -35,7 +36,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at "
+                cmd.CommandText = "SELECT id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at, conversation_id "
                     + "FROM mail_log WHERE anken_id = $a ORDER BY created_at DESC, id DESC";
                 cmd.Parameters.AddWithValue("$a", ankenId);
                 using (var r = cmd.ExecuteReader())
@@ -55,6 +56,7 @@ namespace AnkenDesk.Core
                             SentAt = r.IsDBNull(7) ? (DateTime?)null : DateTime.ParseExact(r.GetString(7), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                             MsgPath = r.IsDBNull(8) ? null : r.GetString(8),
                             CreatedAt = DateTime.ParseExact(r.GetString(9), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                            ConversationId = r.IsDBNull(10) ? null : r.GetString(10),
                         });
                     }
                 }
@@ -70,7 +72,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT id, anken_id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at FROM mail_log ORDER BY created_at DESC, id DESC";
+                cmd.CommandText = "SELECT id, anken_id, supplier_id, kind, to_address, subject, status, entry_id, sent_at, msg_path, created_at, conversation_id FROM mail_log ORDER BY created_at DESC, id DESC";
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read())
@@ -88,12 +90,82 @@ namespace AnkenDesk.Core
                             SentAt = r.IsDBNull(8) ? (DateTime?)null : DateTime.ParseExact(r.GetString(8), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                             MsgPath = r.IsDBNull(9) ? null : r.GetString(9),
                             CreatedAt = DateTime.ParseExact(r.GetString(10), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                            ConversationId = r.IsDBNull(11) ? null : r.GetString(11),
                         });
                     }
                 }
             }
 
             return list;
+        }
+
+        /// <summary>送った依頼・催促のメールのうち、会話IDが無いもの（EntryIDはある）。会話IDを補うために使う。</summary>
+        public IReadOnlyList<KeyValuePair<long, string>> ListMailsMissingConversation()
+        {
+            var list = new List<KeyValuePair<long, string>>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT id, entry_id FROM mail_log WHERE kind IN ('依頼', '催促') AND status = '送信済み' AND entry_id IS NOT NULL AND (conversation_id IS NULL OR conversation_id = '') ORDER BY id";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new KeyValuePair<long, string>(r.GetInt64(0), r.GetString(1)));
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        public void SetMailConversationId(long mailLogId, string conversationId)
+        {
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE mail_log SET conversation_id = $c WHERE id = $id";
+                cmd.Parameters.AddWithValue("$c", conversationId);
+                cmd.Parameters.AddWithValue("$id", mailLogId);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// 会話ID → （案件, 調達先）。送った依頼・催促のメールの記録から作る。
+        /// 同じ会話IDが2つ以上の案件に付いているときは、結びつけられない（曖昧）ので入れない。
+        /// </summary>
+        public IReadOnlyDictionary<string, ConversationLink> ListConversationLinks()
+        {
+            var found = new Dictionary<string, ConversationLink>();
+            var ambiguous = new HashSet<string>();
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT conversation_id, anken_id, supplier_id FROM mail_log WHERE kind IN ('依頼', '催促') AND conversation_id IS NOT NULL AND conversation_id <> '' AND supplier_id IS NOT NULL";
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var conv = r.GetString(0);
+                        var link = new ConversationLink { AnkenId = r.GetInt64(1), SupplierId = r.GetInt64(2) };
+                        ConversationLink? old;
+                        if (found.TryGetValue(conv, out old) && (old.AnkenId != link.AnkenId || old.SupplierId != link.SupplierId))
+                        {
+                            ambiguous.Add(conv);
+                        }
+
+                        found[conv] = link;
+                    }
+                }
+            }
+
+            foreach (var a in ambiguous)
+            {
+                found.Remove(a);
+            }
+
+            return found;
         }
 
         private static MailKind KindFromText(string text)

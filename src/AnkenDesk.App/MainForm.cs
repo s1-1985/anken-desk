@@ -486,6 +486,11 @@ namespace AnkenDesk.App
 
             sb.AppendLine("・オフライン作業: " + (r.Offline ? "はい（このままだと、送ったメールが送信トレイに残ります）" : "いいえ（オンライン）"));
             sb.AppendLine("・受信箱: " + r.InboxCount + " 通（未読 " + r.InboxUnread + " 通）");
+            sb.AppendLine("・会話ID: " + (r.ConversationIdAvailable == true
+                ? "取れます（返信を、送った依頼メールの会話で案件に結べます）"
+                : r.ConversationIdAvailable == false
+                    ? "取れませんでした（返信の会話での仕分けは使えません。品番・差出人での仕分けになります）"
+                    : "調べられませんでした（受信箱が空など）"));
             MessageBox.Show(this, sb.ToString(), "Outlookの接続", MessageBoxButtons.OK, r.Offline ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 

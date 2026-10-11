@@ -38,7 +38,7 @@ namespace AnkenDesk.App
             Controls.Add(new Label { Text = "受信メールの自動仕分け", Font = new Font("BIZ UDPGothic", 18F, FontStyle.Bold), Left = 16, Top = 10, Width = 600, Height = 40 });
             Controls.Add(new Label
             {
-                Text = "受信箱の最近のメール（添付つき）を、件名の品番と差出人から、案件・調達先に振り分けます。「確実」（品番が件名にあり、差出人がその案件の調達先）は最初からチェック済み、「要確認」は人が確かめてからチェックします。\r\n取り込み済みのメールは出ません。受信箱は読むだけで、メールは動かしません。",
+                Text = "受信箱の最近のメールを、案件・調達先に振り分けます。「会話」（こちらから送った依頼・催促メールへの返信とその後のやり取り。件名に品番がなくても、添付がなくても出ます）と、「確実」（品番が件名にあり、差出人がその案件の調達先）は最初からチェック済み。「要確認」（品番だけ合う）は人が確かめてからチェックします。\r\n取り込み済みのメールは出ません。受信箱は読むだけで、メールは動かしません。見積書の添付がない返信は、回答受領日を入れず、メールの記録（.msgとメモ）だけにします。",
                 Left = 16, Top = 52, Width = 1248, Height = 54, ForeColor = Color.FromArgb(90, 96, 100),
             });
 
@@ -122,15 +122,21 @@ namespace AnkenDesk.App
         {
             var days = Days();
             IReadOnlyList<InboundMail> mails;
+            ConversationBackfill.Result filled;
             try
             {
-                mails = Background.Run<IReadOnlyList<InboundMail>>(this, "Outlookの受信箱を読んでいます。\r\nしばらくお待ちください。", () =>
+                var db0 = _services.Db;
+                var scanned = Background.Run<KeyValuePair<IReadOnlyList<InboundMail>, ConversationBackfill.Result>>(this, "Outlookの受信箱を読んでいます。\r\nしばらくお待ちください。", () =>
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return inbox.ListRecent(days, 300);
+                        // 先に、会話IDの無い送信済みの依頼メールに、会話IDを補う（以前に送ったメールの返信も、会話で結べるように）。
+                        var f = ConversationBackfill.Run(inbox, db0);
+                        return new KeyValuePair<IReadOnlyList<InboundMail>, ConversationBackfill.Result>(inbox.ListRecent(days, 300), f);
                     }
                 });
+                mails = scanned.Key;
+                filled = scanned.Value;
             }
             catch (InvalidOperationException ex)
             {
@@ -139,20 +145,23 @@ namespace AnkenDesk.App
             }
 
             var db = _services.Db;
-            _plan = InboundTriage.Plan(mails, db.ListAnkens(), db.ListAllAnkenSuppliers(), db.ListSuppliers(), db.ListImportedEntryIds());
+            var links = db.ListConversationLinks();
+            _plan = InboundTriage.Plan(mails, db.ListAnkens(), db.ListAllAnkenSuppliers(), db.ListSuppliers(), db.ListImportedEntryIds(), links);
 
             _loading = true;
             _list.BeginUpdate();
             _list.Items.Clear();
             foreach (var p in _plan)
             {
-                var item = new ListViewItem(p.Confident ? "確実" : "要確認");
+                var item = new ListViewItem(p.Level == TriageLevel.Thread ? "会話" : p.Confident ? "確実" : "要確認");
                 item.SubItems.Add(p.Mail.ReceivedAt.ToString("MM/dd HH:mm", CultureInfo.InvariantCulture));
                 item.SubItems.Add(string.IsNullOrEmpty(p.Mail.SenderName) ? p.Mail.SenderAddress : p.Mail.SenderName);
                 item.SubItems.Add(p.Mail.Subject);
                 item.SubItems.Add(Home.Title(p.Candidate.Anken));
                 item.SubItems.Add(p.Candidate.Supplier == null ? "（不明）" : p.Candidate.Supplier.ShortName);
-                item.SubItems.Add(string.Join("、", p.AttachmentIndexes.Select(i => p.Mail.Attachments.First(a => a.Index == i).FileName)));
+                item.SubItems.Add(p.AttachmentIndexes.Count == 0
+                    ? "（添付なし：記録のみ）"
+                    : string.Join("、", p.AttachmentIndexes.Select(i => p.Mail.Attachments.First(a => a.Index == i).FileName)));
                 item.Checked = p.Confident && p.Candidate.Supplier != null;
                 if (!p.Confident)
                 {
@@ -165,8 +174,11 @@ namespace AnkenDesk.App
             _list.EndUpdate();
             _loading = false;
 
-            var confident = _plan.Count(p => p.Confident);
-            _summary.Text = mails.Count + " 通を調べて、仕分けられたのは " + _plan.Count + " 通（確実 " + confident + " 通／要確認 " + (_plan.Count - confident) + " 通）";
+            var thread = _plan.Count(p => p.Level == TriageLevel.Thread);
+            var confident = _plan.Count(p => p.Level == TriageLevel.PartAndSender);
+            _summary.Text = mails.Count + " 通を調べて、仕分けられたのは " + _plan.Count + " 通（会話 " + thread + "／確実 " + confident + "／要確認 " + (_plan.Count - thread - confident) + "）"
+                + (filled.Updated > 0 ? "　会話IDを補った: " + filled.Updated + " 件" : "")
+                + (links.Count == 0 ? "　※会話での仕分けは使えません（送った依頼メールの会話IDの記録がありません。左メニュー「Outlookの接続を確認」で、会話IDが取れるか確認できます）" : "");
             UpdateButton();
         }
 
@@ -194,7 +206,8 @@ namespace AnkenDesk.App
             confirm.AppendLine();
             foreach (var p in chosen.Take(12))
             {
-                confirm.AppendLine("・" + Home.Title(p.Candidate.Anken) + " ← " + p.Candidate.Supplier!.ShortName + "（添付 " + p.AttachmentIndexes.Count + " 件）");
+                confirm.AppendLine("・" + Home.Title(p.Candidate.Anken) + " ← " + p.Candidate.Supplier!.ShortName
+                    + (p.AttachmentIndexes.Count == 0 ? "（添付なし：メールの記録のみ）" : "（添付 " + p.AttachmentIndexes.Count + " 件）"));
             }
 
             if (chosen.Count > 12)
@@ -204,7 +217,7 @@ namespace AnkenDesk.App
 
             confirm.AppendLine();
             confirm.AppendLine("添付は「5.調達先見積もり」へ（略称つきの名前、上書きしない）。"
-                + (saveMsg ? "メールは .msg でも保存。" : "") + (markReceived ? "回答受領日を入れる。" : "") + (recordNote ? "内容をメモに残す。" : ""));
+                + (saveMsg ? "メールは .msg でも保存。" : "") + (markReceived ? "回答受領日は、見積書（PDF・Excel）の添付があるものだけ入れる。" : "") + (recordNote ? "内容をメモに残す。" : ""));
             if (MessageBox.Show(this, confirm.ToString(), "取り込みの確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             {
                 return;
@@ -230,7 +243,7 @@ namespace AnkenDesk.App
                             try
                             {
                                 var outcome = InboundImporter.Import(inbox, services.Db, anken, System.IO.Path.Combine(workspace, anken.FolderPath), sup, p.Mail,
-                                    p.AttachmentIndexes, saveMsg, markReceived ? (DateTime?)p.Mail.ReceivedAt.Date : null, DateTime.Now, recordNote);
+                                    p.AttachmentIndexes, saveMsg, markReceived && p.HasQuoteAttachment ? (DateTime?)p.Mail.ReceivedAt.Date : null, DateTime.Now, recordNote || p.AttachmentIndexes.Count == 0);
                                 savedFiles.AddRange(outcome.SavedFiles);
                                 lines.Add((outcome.Errors.Count == 0 ? "○ " : "△ ") + Home.Title(anken) + " ← " + sup.ShortName + "：保存 " + outcome.SavedFiles.Count + " 件"
                                     + (outcome.Errors.Count > 0 ? "（失敗 " + outcome.Errors.Count + " 件: " + string.Join(" / ", outcome.Errors) + "）" : ""));

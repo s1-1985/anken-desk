@@ -26,6 +26,9 @@ namespace AnkenDesk.Core
 
         /// <summary>送信済みアイテムのメール（受信日時は送信日時）。</summary>
         public bool IsSent { get; set; }
+
+        /// <summary>Outlookの会話ID。返信は、元のメールと同じになる。取れなければ空。</summary>
+        public string ConversationId { get; set; } = "";
         public List<InboundAttachment> Attachments { get; } = new List<InboundAttachment>();
     }
 
@@ -46,6 +49,9 @@ namespace AnkenDesk.Core
         /// ドラッグすると、そのメールが選ばれた状態になっているので、選択を読む。メール以外の項目は除く。
         /// </summary>
         IReadOnlyList<InboundMail> GetSelected(int maxCount);
+
+        /// <summary>メールの会話ID。メールが見つからない・取れないときは null。</summary>
+        string? GetConversationId(string entryId);
 
         /// <summary>メールの本文（テキスト）。長いときは maxChars 文字で切る。</summary>
         string ReadBody(string entryId, int maxChars);

@@ -54,6 +54,12 @@ namespace AnkenDesk.Core
         public string? EntryId { get; set; }
         public DateTime? SentAt { get; set; }
 
+        /// <summary>
+        /// Outlookの会話ID（ConversationID）。返信は、同じ会話IDになる。返信を、送った依頼メールの案件に結びつけるために記録する。
+        /// 取れなかったとき（Outlookや接続の種類によっては空）は null。
+        /// </summary>
+        public string? ConversationId { get; set; }
+
         /// <summary>送信したメールを.msgとして保存できたか。保存先のフルパスは、依頼したパスと同じ。</summary>
         public bool MsgSaved { get; set; }
     }
@@ -92,5 +98,18 @@ namespace AnkenDesk.Core
         /// <summary>.msgのWork spaceからの相対パス。</summary>
         public string? MsgPath { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>Outlookの会話ID（返信を結びつける鍵）。</summary>
+        public string? ConversationId { get; set; }
+    }
+}
+
+namespace AnkenDesk.Core
+{
+    /// <summary>送った依頼・催促のメールと同じ会話に属するメールの、取り込み先。</summary>
+    public sealed class ConversationLink
+    {
+        public long AnkenId { get; set; }
+        public long SupplierId { get; set; }
     }
 }

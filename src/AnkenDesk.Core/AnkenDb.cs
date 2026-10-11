@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 7;
+        private const int SchemaVersion = 8;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -492,6 +492,18 @@ namespace AnkenDesk.Core
                         // Outlookの予定表に入れた回答期限の予定（あとで更新・削除できるように、EntryIDを持つ）。
                         Exec(conn, tx, "ALTER TABLE anken ADD COLUMN calendar_entry_id TEXT");
                         Exec(conn, tx, "PRAGMA user_version = 7");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 8)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // 送ったメールのOutlook会話ID。返信を、送った依頼メールの案件・調達先に結びつける鍵。
+                        Exec(conn, tx, "ALTER TABLE mail_log ADD COLUMN conversation_id TEXT");
+                        Exec(conn, tx, "CREATE INDEX idx_mail_log_conversation ON mail_log (conversation_id)");
+                        Exec(conn, tx, "PRAGMA user_version = 8");
                         tx.Commit();
                     }
                 }

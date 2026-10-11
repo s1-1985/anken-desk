@@ -181,6 +181,25 @@ namespace AnkenDesk.OutlookAccess
             return result;
         }
 
+        public string? GetConversationId(string entryId)
+        {
+            dynamic? item = null;
+            try
+            {
+                item = _ns!.GetItemFromID(entryId);
+                var id = (string)item.ConversationID;
+                return string.IsNullOrEmpty(id) ? null : id;
+            }
+            catch (COMException)
+            {
+                return null; // 見つからない（移動・削除された）、会話IDが取れない
+            }
+            finally
+            {
+                Release(item);
+            }
+        }
+
         public string ReadBody(string entryId, int maxChars)
         {
             dynamic? item = null;
@@ -245,6 +264,7 @@ namespace AnkenDesk.OutlookAccess
                 SenderName = SafeString(() => (string)item.SenderName),
                 SenderAddress = ReadSenderAddress(item),
                 ReceivedAt = received,
+                ConversationId = SafeString(() => (string)item.ConversationID),
             };
 
             dynamic? atts = null;

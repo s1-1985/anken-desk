@@ -280,9 +280,26 @@ namespace AnkenDesk.App
 
             LoadMasters();
             _candidates = new Dictionary<string, InboundCandidate?>();
+            var links = _services.Db.ListConversationLinks();
             foreach (var m in _mails)
             {
-                _candidates[m.EntryId] = InboundMatcher.Suggest(m, _ankens, _ankenSuppliers, _suppliers.Values).FirstOrDefault();
+                // 送った依頼・催促と同じ会話のメールは、その案件・調達先を第一候補にする（件名に品番が無くても）。
+                ConversationLink? link;
+                AnkenRecord? linked = null;
+                AnkenSupplier? linkedSupplier = null;
+                if (!string.IsNullOrEmpty(m.ConversationId) && links.TryGetValue(m.ConversationId, out link))
+                {
+                    linked = _ankens.FirstOrDefault(a => a.Id == link.AnkenId);
+                    IReadOnlyList<AnkenSupplier>? list;
+                    if (linked != null && _ankenSuppliers.TryGetValue(linked.Id, out list))
+                    {
+                        linkedSupplier = list.FirstOrDefault(x => x.SupplierId == link.SupplierId);
+                    }
+                }
+
+                _candidates[m.EntryId] = linked != null && linkedSupplier != null
+                    ? new InboundCandidate { Anken = linked, Supplier = linkedSupplier, Score = 1000 }
+                    : InboundMatcher.Suggest(m, _ankens, _ankenSuppliers, _suppliers.Values).FirstOrDefault();
             }
 
             ApplyFilter();

@@ -14,6 +14,7 @@ namespace AnkenDesk.Core.Tests
         public readonly List<InboundMail> Selected = new List<InboundMail>();
         public string Body = "本文のダミー";
         public bool FailBody;
+        public readonly Dictionary<string, string> Conversations = new Dictionary<string, string>();
 
         public readonly List<InboundMail> SentMails = new List<InboundMail>();
 
@@ -45,6 +46,12 @@ namespace AnkenDesk.Core.Tests
         public IReadOnlyList<InboundMail> GetSelected(int maxCount)
         {
             return Selected.GetRange(0, Math.Min(maxCount, Selected.Count));
+        }
+
+        public string? GetConversationId(string entryId)
+        {
+            string c;
+            return Conversations.TryGetValue(entryId, out c) ? c : null;
         }
 
         public string ReadBody(string entryId, int maxChars)
