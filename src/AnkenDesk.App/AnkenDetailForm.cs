@@ -31,7 +31,20 @@ namespace AnkenDesk.App
         private readonly ComboBox _statusBox = new ComboBox();
         private readonly PdfPreviewPanel _previewPanel = new PdfPreviewPanel { Visible = false };
         private bool _loadingStatus;
-        private Button _notesButton = new Button();
+
+        // タブ（比較表／経過／メモ／ファイル／類似案件／チェック）。メモ以降は、開いたときに作る。
+        private readonly TabControl _tabs = new TabControl();
+        private readonly TabPage _tabCompare = new TabPage("比較表");
+        private readonly TabPage _tabHistory = new TabPage("経過");
+        private readonly TabPage _tabNotes = new TabPage("メモ");
+        private readonly TabPage _tabFiles = new TabPage("ファイル");
+        private readonly TabPage _tabSimilar = new TabPage("過去の類似案件");
+        private readonly TabPage _tabChecks = new TabPage("チェック");
+        private Form? _notesView;
+        private Form? _galleryView;
+        private Form? _similarView;
+        private Form? _checksView;
+        private ToolStripMenuItem? _previewItem;
 
         // 経過の各行に対応する .msg のフルパス（無い行はnull）。行をダブルクリックして開く。
         private readonly List<string?> _historyMsg = new List<string?>();
@@ -44,127 +57,89 @@ namespace AnkenDesk.App
             _services = services;
             _ankenId = ankenId;
             UiStyle.Apply(this);
-            var height = Math.Min(940, Screen.PrimaryScreen.WorkingArea.Height - 60);
+            var height = Math.Min(900, Screen.PrimaryScreen.WorkingArea.Height - 60);
             ClientSize = new Size(1300, height);
             StartPosition = FormStartPosition.CenterParent;
 
-            _title.SetBounds(16, 10, 660, 44);
+            // 1段目: 戻る、案件名
+            var back = UiStyle.CreateButton("← 戻る", false, 110);
+            back.Left = 16; back.Top = 8;
+            back.Click += (s, e) => Close();
+            _title.SetBounds(140, 8, 1000, 40);
             _title.AutoEllipsis = true;
+            _title.TextAlign = ContentAlignment.MiddleLeft;
             _title.Font = new Font("BIZ UDPGothic", 18F, FontStyle.Bold);
+            _title.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            var titleBar = new Panel { Dock = DockStyle.Top, Height = 56 };
+            titleBar.Controls.AddRange(new Control[] { back, _title });
 
-            var open = UiStyle.CreateButton("エクスプローラーで開く", false, 230);
-            open.Left = 1054; open.Top = 10;
-            open.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            open.Click += (s, e) => OpenFolder();
-            var makeRequest = UiStyle.CreateButton("見積依頼書を作成", true, 190);
-            makeRequest.Left = 856; makeRequest.Top = 10;
-            makeRequest.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            makeRequest.Click += (s, e) => MakeRequestSheet();
-            var editAnken = UiStyle.CreateButton("案件の項目を編集", false, 170);
-            editAnken.Left = 678; editAnken.Top = 10;
-            editAnken.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            editAnken.Click += (s, e) => EditAnken();
-
-            // 操作ボタン（1段目: 調達先と回答、2段目: 見積書）
-            var add = ToolButton("調達先を加える", true, 16, 60, 150);
-            add.Click += (s, e) => AddSuppliers();
-            var input = ToolButton("回答を入力・変更", true, 174, 60, 170);
-            input.Click += (s, e) => EditAnswer();
-            var requote = ToolButton("出し直しを受け取る", true, 352, 60, 200);
-            requote.Click += (s, e) => Requote();
-            var history = ToolButton("履歴を見る", false, 560, 60, 130);
-            history.Click += (s, e) => ShowHistory();
-            var remove = ToolButton("調達先を外す", false, 698, 60, 150);
-            remove.Click += (s, e) => RemoveSupplier();
-            var saveFile = ToolButton("見積書を保存...", false, 856, 60, 160);
-            saveFile.Click += (s, e) => SaveQuoteFilesWithDialog();
-            var preview = ToolButton("見積書を見る", false, 1024, 60, 150);
-            preview.Click += (s, e) => PreviewQuotes();
-
-            var mailRequest = ToolButton("見積依頼メールを作成", true, 16, 108, 230);
+            // 2段目: よく使う操作は直接ボタン、あとは用途ごとのメニューにまとめる。
+            var answer = UiStyle.CreateButton("回答を入力・変更", true, 170);
+            answer.Click += (s, e) => EditAnswer();
+            var mailRequest = UiStyle.CreateButton("見積依頼メール", true, 160);
             mailRequest.Click += (s, e) => OpenMail(MailKind.Request);
-            var mailReminder = ToolButton("催促メールを作成", true, 254, 108, 200);
+            var mailReminder = UiStyle.CreateButton("催促メール", true, 130);
             mailReminder.Click += (s, e) => OpenMail(MailKind.Reminder);
 
-            var importMail = ToolButton("受信メールから取り込む", false, 462, 108, 240);
-            importMail.Click += (s, e) => ImportFromMail();
+            var menuRequest = MenuButton("依頼", 100,
+                MenuEntry("調達先を加える", AddSuppliers),
+                MenuEntry("調達先を外す", RemoveSupplier),
+                MenuEntry("外した調達先を戻す", RestoreRemovedSupplier),
+                null,
+                MenuEntry("見積依頼書（Excel）を作成", MakeRequestSheet),
+                MenuEntry("回答期限をOutlookの予定表へ", SyncCalendar));
+            var menuAnswer = MenuButton("回答", 100,
+                MenuEntry("出し直しを受け取る", Requote),
+                MenuEntry("辞退・検討中を設定", SetResponse),
+                MenuEntry("履歴を見る", ShowHistory),
+                null,
+                MenuEntry("見積書を保存...", SaveQuoteFilesWithDialog),
+                MenuEntry("見積書を見る", PreviewQuotes),
+                MenuEntry("受信メールから取り込む", ImportFromMail));
+            var menuCalc = MenuButton("見積計算", 130,
+                MenuEntry("提出単価と粗利", OpenPricing),
+                MenuEntry("比較表をチェック", RunChecks),
+                null,
+                MenuEntry("比較表をExcelに出力", ExportComparison),
+                MenuEntry("客先見積書を作成", MakeClientQuote));
+            var menuAnken = MenuButton("案件", 100,
+                MenuEntry("案件の項目を編集", EditAnken),
+                MenuEntry("結果を入力", OpenResult),
+                MenuEntry("この案件を元に登録", CopyAsNew),
+                null,
+                MenuEntry("エクスプローラーで開く", OpenFolder),
+                MenuEntry("PDFプレビュー欄を出す／隠す", TogglePreview, out _previewItem));
 
-            var gallery = ToolButton("ファイルを画像で見る", false, 710, 108, 220);
-            gallery.Click += (s, e) =>
-            {
-                using (var dlg = new FileGalleryForm(_services, _anken))
-                {
-                    dlg.ShowDialog(this);
-                }
-            };
-
-            var response = ToolButton("辞退・検討中を設定", false, 938, 108, 220);
-            response.Click += (s, e) => SetResponse();
-
-            // 4段目: 案件の状態、比較表のExcel、外した調達先を戻す、この案件を元に登録、プレビュー欄
-            var statusCaption = new Label { Text = "状態", Left = 16, Top = 164, Width = 50, Height = 28 };
-            _statusBox.SetBounds(68, 160, 170, 32);
+            var statusCaption = new Label { Text = "状態", AutoSize = false, Width = 44, Height = UiStyle.ButtonHeight, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(24, 4, 0, 4) };
+            _statusBox.Width = 150;
+            _statusBox.Margin = new Padding(0, 9, 0, 0);
             _statusBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _statusBox.Items.AddRange(AnkenStatus.All);
             _statusBox.SelectedIndexChanged += (s, e) => ChangeAnkenStatus();
-            var exportXlsx = ToolButton("比較表をExcelに出力", false, 250, 156, 220);
-            exportXlsx.Click += (s, e) => ExportComparison();
-            var restore = ToolButton("外した調達先を戻す", false, 478, 156, 210);
-            restore.Click += (s, e) => RestoreRemovedSupplier();
-            var copyNew = ToolButton("この案件を元に登録", false, 696, 156, 210);
-            copyNew.Click += (s, e) => CopyAsNew();
-            var togglePreview = ToolButton("PDFプレビュー欄", false, 914, 156, 190);
-            togglePreview.Click += (s, e) => TogglePreview();
 
-            // 5段目: メモ、過去の類似案件、提出単価と粗利、結果を入力
-            _notesButton = ToolButton("メモ", true, 16, 204, 170);
-            _notesButton.Click += (s, e) => OpenNotes();
-            var similar = ToolButton("過去の類似案件", false, 194, 204, 200);
-            similar.Click += (s, e) =>
-            {
-                using (var dlg = new SimilarForm(_services, _anken))
-                {
-                    dlg.ShowDialog(this);
-                }
-            };
-            var pricing = ToolButton("提出単価と粗利", false, 402, 204, 200);
-            pricing.Click += (s, e) => OpenPricing();
-            var result = ToolButton("結果を入力", false, 610, 204, 170);
-            result.Click += (s, e) => OpenResult();
+            var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 56, Padding = new Padding(12, 4, 12, 4), WrapContents = false };
+            toolbar.Controls.AddRange(new Control[] { answer, mailRequest, mailReminder, menuRequest, menuAnswer, menuCalc, menuAnken, statusCaption, _statusBox });
 
-            var calendar = ToolButton("回答期限をOutlookの予定表へ", false, 788, 204, 280);
-            calendar.Click += (s, e) => SyncCalendar();
-            var checks = ToolButton("比較表をチェック", false, 1076, 204, 200);
-            checks.Click += (s, e) => RunChecks();
-            var clientQuote = ToolButton("客先見積書を作成", false, 1112, 156, 172);
-            clientQuote.Click += (s, e) => MakeClientQuote();
-
-            _hint.SetBounds(16, 252, 1268, 24);
-            _hint.ForeColor = Color.FromArgb(90, 96, 100);
-            _hint.Text = "ファイルは表の調達先の列へ（見積書として保存）。それ以外の場所へドロップすると、保存先を選べます。Outlookのメールも、どこへでもドロップできます。";
-
-            var band = new Panel { Left = 16, Top = 280, Width = 1268, Height = 80, BackColor = Color.White };
+            // 案件の情報帯
+            var band = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = Color.White };
             Place(band, "得意先・種別", _client, 0, 330);
             Place(band, "依頼日", _requestDate, 330, 180);
             Place(band, "回答期限", _dueDate, 510, 300);
             Place(band, "回答状況", _progress, 810, 450);
+            band.Padding = new Padding(16, 0, 0, 0);
+            var bandHost = new Panel { Dock = DockStyle.Top, Height = 84, Padding = new Padding(16, 4, 16, 4) };
+            band.Dock = DockStyle.Fill;
+            bandHost.Controls.Add(band);
 
-            var bodyTop = 372;
-            var historyHeight = 100;
-            var bodyHeight = height - bodyTop - historyHeight - 64;
+            _hint.Dock = DockStyle.Bottom;
+            _hint.Height = 28;
+            _hint.TextAlign = ContentAlignment.MiddleLeft;
+            _hint.Padding = new Padding(16, 0, 0, 0);
+            _hint.ForeColor = Color.FromArgb(90, 96, 100);
+            _hint.Text = "ファイルは、比較表の調達先の列へドロップすると見積書として保存、それ以外は保存先を選べます。Outlookのメールも、どこへでもドロップできます。";
 
-            var folderPanel = new Panel { Left = 16, Top = bodyTop, Width = 300, Height = bodyHeight, BackColor = Color.White };
-            folderPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Bottom;
-            folderPanel.Controls.Add(new Label { Text = "フォルダ（ファイル数）", Left = 12, Top = 10, Width = 276, Height = 28, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) });
-            _folders.SetBounds(8, 44, 284, bodyHeight - 52);
-            _folders.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            _folders.IntegralHeight = false;
-            _folders.SelectionMode = SelectionMode.None;
-            _folders.TabStop = false;
-            folderPanel.Controls.Add(_folders);
-
-            _grid.SetBounds(328, bodyTop, 956, bodyHeight);
-            _grid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            // ---- 比較表のタブ ----
+            _grid.Dock = DockStyle.Fill;
             _grid.ReadOnly = true;
             _grid.AllowUserToAddRows = false;
             _grid.AllowUserToDeleteRows = false;
@@ -233,31 +208,176 @@ namespace AnkenDesk.App
                 }
             };
 
-            var historyTitle = new Label { Text = "経過", Left = 16, Top = height - historyHeight - 38, Width = 120, Height = 26, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) };
-            historyTitle.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
-            _status.SetBounds(140, height - historyHeight - 38, 1140, 26);
-            _status.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            _history.SetBounds(16, height - historyHeight - 8, 1268, historyHeight);
-            _history.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            _previewPanel.Dock = DockStyle.Right;
+            _previewPanel.Width = 460;
+            _tabCompare.Controls.Add(_grid);
+            _tabCompare.Controls.Add(_previewPanel);
+            _grid.BringToFront();
+            _tabCompare.Padding = new Padding(0, 8, 0, 0);
+            _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
+
+            // ---- 経過のタブ ----
+            _status.Dock = DockStyle.Top;
+            _status.Height = 28;
+            _status.ForeColor = Color.FromArgb(90, 96, 100);
+            _history.Dock = DockStyle.Fill;
             _history.IntegralHeight = false;
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
+            _tabHistory.Controls.Add(_history);
+            _tabHistory.Controls.Add(_status);
+            _tabHistory.Padding = new Padding(0, 8, 0, 0);
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, calendar, checks, clientQuote, response, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            // ---- ファイルのタブ（左にフォルダのファイル数、右に画像） ----
+            var folderPanel = new Panel { Dock = DockStyle.Left, Width = 300, BackColor = Color.White, Padding = new Padding(8) };
+            _folders.Dock = DockStyle.Fill;
+            _folders.IntegralHeight = false;
+            _folders.SelectionMode = SelectionMode.None;
+            _folders.TabStop = false;
+            folderPanel.Controls.Add(_folders);
+            folderPanel.Controls.Add(new Label { Text = "フォルダ（ファイル数）", Dock = DockStyle.Top, Height = 32, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) });
+            _tabFiles.Controls.Add(folderPanel);
+            _tabFiles.Padding = new Padding(0, 8, 0, 0);
 
-            Controls.Add(_previewPanel);
-            _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
+            _tabs.Dock = DockStyle.Fill;
+            _tabs.Font = new Font("BIZ UDPGothic", 11F);
+            _tabs.Padding = new Point(18, 6);
+            _tabs.Controls.AddRange(new Control[] { _tabCompare, _tabHistory, _tabNotes, _tabFiles, _tabSimilar, _tabChecks });
+            _tabs.SelectedIndexChanged += (s, e) => EnsureTab();
+
+            var tabHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 0, 16, 4) };
+            tabHost.Controls.Add(_tabs);
+
+            // Dockの積み順: 先に足したものが奥（下）。
+            Controls.Add(tabHost);
+            Controls.Add(_hint);
+            Controls.Add(bandHost);
+            Controls.Add(toolbar);
+            Controls.Add(titleBar);
+
             Activated += (s, e) => Reload();
             Reload();
         }
 
-        private static Button ToolButton(string text, bool primary, int x, int y, int width)
+        // Escで戻る。ただし、文字を入力しているとき（メモなど）は、入力を消さないために戻らない。
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            var b = UiStyle.CreateButton(text, primary, width);
-            b.Left = x;
-            b.Top = y;
-            b.Margin = new Padding(0);
+            if (keyData == Keys.Escape && !(ActiveControl is TextBoxBase) && !(ActiveControl is ComboBox))
+            {
+                var inner = ActiveControl as ContainerControl;
+                if (inner == null || !(inner.ActiveControl is TextBoxBase))
+                {
+                    Close();
+                    return true;
+                }
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // 用途ごとにまとめたメニューのボタン。押すと、下に項目が開く。
+        private static Button MenuButton(string text, int width, params ToolStripItem?[] entries)
+        {
+            var b = UiStyle.CreateButton(text + " ▼", false, width);
+            var menu = new ContextMenuStrip { Font = new Font("BIZ UDPGothic", 11F), ShowImageMargin = false };
+            foreach (var e in entries)
+            {
+                if (e == null)
+                {
+                    menu.Items.Add(new ToolStripSeparator());
+                }
+                else
+                {
+                    e.Padding = new Padding(0, 6, 0, 6);
+                    menu.Items.Add(e);
+                }
+            }
+
+            b.Click += (s, e) => menu.Show(b, new Point(0, b.Height));
             return b;
+        }
+
+        private static ToolStripMenuItem MenuEntry(string text, Action action)
+        {
+            var item = new ToolStripMenuItem(text);
+            item.Click += (s, e) => action();
+            return item;
+        }
+
+        private static ToolStripMenuItem MenuEntry(string text, Action action, out ToolStripMenuItem item)
+        {
+            item = MenuEntry(text, action);
+            item.CheckOnClick = false;
+            return item;
+        }
+
+        // ---- タブ ----
+
+        private void EnsureTab()
+        {
+            var tab = _tabs.SelectedTab;
+            if (tab == _tabNotes)
+            {
+                if (_notesView == null)
+                {
+                    _notesView = new NotesForm(_services, _anken);
+                    EmbeddedForm.Host(_tabNotes, _notesView);
+                }
+            }
+            else if (tab == _tabFiles)
+            {
+                if (_galleryView == null)
+                {
+                    _galleryView = new FileGalleryForm(_services, _anken);
+                    EmbeddedForm.Host(_tabFiles, _galleryView);
+                    _galleryView.BringToFront();
+                }
+            }
+            else if (tab == _tabSimilar)
+            {
+                ReplaceView(ref _similarView, _tabSimilar, new SimilarForm(_services, _anken));
+            }
+            else if (tab == _tabChecks)
+            {
+                BuildChecksTab();
+            }
+
+            if (tab != _tabNotes)
+            {
+                RefreshNoteCount();
+            }
+        }
+
+        private static void ReplaceView(ref Form? slot, TabPage page, Form view)
+        {
+            if (slot != null)
+            {
+                page.Controls.Remove(slot);
+                slot.Dispose();
+            }
+
+            slot = view;
+            EmbeddedForm.Host(page, view);
+        }
+
+        // 比較表のチェック。開くたびに、今の内容で作り直す。
+        private void BuildChecksTab()
+        {
+            var patterns = _services.Db.ListQuantities(_ankenId);
+            if (_suppliers.Count == 0 || patterns.Count == 0)
+            {
+                ReplaceView(ref _checksView, _tabChecks, new QuoteChecksForm(Home.Title(_anken), new List<QuoteWarning>(), "調達先と見積依頼数量が要ります。"));
+                return;
+            }
+
+            var warnings = QuoteChecks.Run(patterns, _suppliers, _services.Db.ListQuotes(_ankenId), DateTime.Today);
+            ReplaceView(ref _checksView, _tabChecks, new QuoteChecksForm(Home.Title(_anken), warnings));
+        }
+
+        private void RefreshNoteCount()
+        {
+            var notes = _services.Db.CountNotes(_ankenId);
+            _tabNotes.Text = notes > 0 ? "メモ（" + notes + "件）" : "メモ";
         }
 
         private static void Place(Panel band, string caption, Label value, int x, int width)
@@ -281,8 +401,7 @@ namespace AnkenDesk.App
             }
 
             _anken = a;
-            var notes = _services.Db.CountNotes(_ankenId);
-            _notesButton.Text = notes > 0 ? "メモ（" + notes + "件）" : "メモ";
+            RefreshNoteCount();
             _loadingStatus = true;
             _statusBox.SelectedItem = a.Status;
             _loadingStatus = false;
@@ -636,17 +755,13 @@ namespace AnkenDesk.App
 
         private void RunChecks()
         {
-            var patterns = _services.Db.ListQuantities(_ankenId);
-            if (_suppliers.Count == 0 || patterns.Count == 0)
+            if (_tabs.SelectedTab == _tabChecks)
             {
-                MessageBox.Show(this, "調達先と見積依頼数量が要ります。", "比較表のチェック", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                BuildChecksTab();
             }
-
-            var warnings = QuoteChecks.Run(patterns, _suppliers, _services.Db.ListQuotes(_ankenId), DateTime.Today);
-            using (var dlg = new QuoteChecksForm(Home.Title(_anken), warnings))
+            else
             {
-                dlg.ShowDialog(this);
+                _tabs.SelectedTab = _tabChecks;
             }
         }
 
@@ -1044,16 +1159,6 @@ namespace AnkenDesk.App
             }
         }
 
-        private void OpenNotes()
-        {
-            using (var dlg = new NotesForm(_services, _anken))
-            {
-                dlg.ShowDialog(this);
-            }
-
-            Reload();
-        }
-
         private void OpenPricing()
         {
             if (_suppliers.Count == 0 || _services.Db.ListQuantities(_ankenId).Count == 0)
@@ -1094,18 +1199,6 @@ namespace AnkenDesk.App
             }
 
             Reload();
-        }
-
-        // Esc: 閉じる（入力中のコンボなどが開いているときは、そちらが先に閉じる）
-        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-        {
-            if (keyData == Keys.Escape && !_statusBox.DroppedDown)
-            {
-                Close();
-                return true;
-            }
-
-            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void ChangeAnkenStatus()
@@ -1215,19 +1308,17 @@ namespace AnkenDesk.App
             }
         }
 
-        // PDFプレビュー欄の表示・非表示（表を狭めて右に出す）。
+        // PDFプレビュー欄の表示・非表示（比較表の右に出す）。
         private void TogglePreview()
         {
+            _tabs.SelectedTab = _tabCompare;
             _previewPanel.Visible = !_previewPanel.Visible;
-            _grid.Width = _previewPanel.Visible ? 560 : 956;
-            if (_previewPanel.Visible)
+            if (_previewItem != null)
             {
-                _previewPanel.Left = _grid.Left + _grid.Width + 8;
-                _previewPanel.Top = _grid.Top;
-                _previewPanel.Size = new Size(1284 - _previewPanel.Left, _grid.Height);
-                _previewPanel.BringToFront();
-                UpdatePreviewPanel();
+                _previewItem.Checked = _previewPanel.Visible;
             }
+
+            UpdatePreviewPanel();
         }
 
         private void UpdatePreviewPanel()

@@ -11,6 +11,9 @@ namespace AnkenDesk.App
 
         public AnkenDb Db { get; }
 
+        /// <summary>案件画面を、本体の中に開く（MainFormが設定する）。無いときは、各画面が別窓で開く。</summary>
+        public Action<long>? NavigateToAnken { get; set; }
+
         /// <summary>DBと、DBの控えを置く場所。</summary>
         public static string DataDir()
         {

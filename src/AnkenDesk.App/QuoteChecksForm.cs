@@ -9,7 +9,7 @@ namespace AnkenDesk.App
     /// <summary>比較表の自動チェックの結果。「確認」と「気づき」に分けて出す（機械的な検査なので、間違いとは限らない）。</summary>
     internal sealed class QuoteChecksForm : Form
     {
-        public QuoteChecksForm(string title, IReadOnlyList<QuoteWarning> warnings)
+        public QuoteChecksForm(string title, IReadOnlyList<QuoteWarning> warnings, string? emptyMessage = null)
         {
             UiStyle.Apply(this);
             Text = "比較表のチェック　" + title;
@@ -45,7 +45,7 @@ namespace AnkenDesk.App
             Controls.Add(list);
             if (warnings.Count == 0)
             {
-                Controls.Add(new Label { Text = "気になる点は見つかりませんでした。", Left = 16, Top = 494, Width = 600, Height = 30, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) });
+                Controls.Add(new Label { Text = emptyMessage ?? "気になる点は見つかりませんでした。", Left = 16, Top = 494, Width = 600, Height = 30, Font = new Font("BIZ UDPGothic", 12F, FontStyle.Bold) });
             }
 
             var close = UiStyle.CreateButton("閉じる", false, 140);

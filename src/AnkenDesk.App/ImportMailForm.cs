@@ -135,7 +135,7 @@ namespace AnkenDesk.App
             Controls.AddRange(new Control[] { _import, close });
 
             LoadMasters();
-            Shown += (s, e) => LoadMails();
+            Load += (s, e) => LoadMails();
             UpdateButtons();
         }
 

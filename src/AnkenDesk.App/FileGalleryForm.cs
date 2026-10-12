@@ -49,7 +49,7 @@ namespace AnkenDesk.App
             _folder.Items.Add("すべて");
             _folder.Items.AddRange(FolderNames.Subfolders);
             _folder.SelectedIndex = 0;
-            _folder.SelectedIndexChanged += (s, e) => Load();
+            _folder.SelectedIndexChanged += (s, e) => LoadFiles();
             Controls.Add(_folder);
 
             var open = UiStyle.CreateButton("開く", true, 130);
@@ -60,7 +60,7 @@ namespace AnkenDesk.App
             enlarge.Click += (s, e) => Enlarge();
             var reload = UiStyle.CreateButton("読み直す", false, 130);
             reload.Left = 790; reload.Top = 54;
-            reload.Click += (s, e) => Load();
+            reload.Click += (s, e) => LoadFiles();
             Controls.AddRange(new Control[] { open, enlarge, reload });
 
             _status.SetBounds(16, 102, 1208, 26);
@@ -83,11 +83,11 @@ namespace AnkenDesk.App
             close.Click += (s, e) => Close();
             Controls.Add(close);
 
-            Shown += (s, e) => Load();
+            Load += (s, e) => LoadFiles();
             FormClosing += (s, e) => _closing = true;
         }
 
-        private void Load()
+        private void LoadFiles()
         {
             var gen = ++_generation;
             _list.BeginUpdate();

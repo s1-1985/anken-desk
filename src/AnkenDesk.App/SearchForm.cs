@@ -67,7 +67,7 @@ namespace AnkenDesk.App
             close.Click += (s, e) => Close();
             Controls.AddRange(new Control[] { open, close });
             CancelButton = close;
-            Shown += (s, e) => _query.Focus();
+            ActiveControl = _query;
         }
 
         private void Search()
@@ -123,6 +123,12 @@ namespace AnkenDesk.App
                     MessageBox.Show(this, "開けませんでした。\r\n\r\n" + ex.Message, "横断検索", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
+                return;
+            }
+
+            if (_services.NavigateToAnken != null)
+            {
+                _services.NavigateToAnken(h.Anken.Id);
                 return;
             }
 

@@ -146,6 +146,12 @@ namespace AnkenDesk.App
             }
 
             var f = _found[_ankens.SelectedIndices[0]];
+            if (_services.NavigateToAnken != null)
+            {
+                _services.NavigateToAnken(f.Anken.Id);
+                return;
+            }
+
             using (var dlg = new AnkenDetailForm(_services, f.Anken.Id))
             {
                 dlg.ShowDialog(this);

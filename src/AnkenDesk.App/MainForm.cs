@@ -33,6 +33,11 @@ namespace AnkenDesk.App
         private Button? _navRemind;
         private Button? _navHome;
         private Button? _navList;
+        private Control? _current;
+        private Button? _currentNav;
+        private bool _closingEmbedded;
+        private readonly List<Form> _embedded = new List<Form>();
+        private readonly Stack<Tuple<Control, Button?>> _returnStack = new Stack<Tuple<Control, Button?>>();
         private readonly Panel _body = new Panel { Dock = DockStyle.Fill };
         private Control? _homeView;
         private AnkenListView? _listView;
@@ -50,6 +55,7 @@ namespace AnkenDesk.App
         public MainForm(AppServices services)
         {
             _services = services;
+            _services.NavigateToAnken = OpenAnken;
             UiStyle.Apply(this);
             Text = AppInfo.Title;
             var screen = Screen.PrimaryScreen.WorkingArea;
@@ -134,7 +140,7 @@ namespace AnkenDesk.App
 
         // ---- 本体の切り替え（ホーム／案件一覧） ----
 
-        private void ShowView(Control view, Button nav)
+        private void ShowView(Control view, Button? nav)
         {
             foreach (Control c in _body.Controls)
             {
@@ -147,19 +153,24 @@ namespace AnkenDesk.App
                 b.BackColor = selected ? NavSelected : Color.White;
                 b.Font = new Font("BIZ UDPGothic", 11F, selected ? FontStyle.Bold : FontStyle.Regular);
             }
+
+            _current = view;
+            _currentNav = nav;
         }
 
         private void ShowHomeView()
         {
+            DiscardEmbedded();
             ShowView(_homeView!, _navHome!);
             Reload();
         }
 
         private void ShowListView()
         {
+            DiscardEmbedded();
             if (_listView == null)
             {
-                _listView = new AnkenListView(_services);
+                _listView = new AnkenListView(_services, OpenAnken);
                 _body.Controls.Add(_listView);
             }
             else
@@ -168,6 +179,97 @@ namespace AnkenDesk.App
             }
 
             ShowView(_listView, _navList!);
+        }
+
+        // ---- 本体の中に表示する画面（別の窓は開かない） ----
+
+        // 左のメニューから画面を開く。前に開いていた画面は片づける。
+        private void OpenEmbedded(Form view, Button? nav)
+        {
+            DiscardEmbedded();
+            AttachEmbedded(view, nav);
+        }
+
+        private void AttachEmbedded(Form view, Button? nav)
+        {
+            EmbeddedForm.Prepare(view);
+            _body.Controls.Add(view);
+            _embedded.Add(view);
+            view.FormClosed += (s, e) => OnEmbeddedClosed(view);
+            view.Show();
+            ShowView(view, nav);
+        }
+
+        private void DiscardEmbedded()
+        {
+            _closingEmbedded = true;
+            try
+            {
+                foreach (var f in _embedded.ToList())
+                {
+                    _body.Controls.Remove(f);
+                    f.Dispose();
+                }
+
+                _embedded.Clear();
+                _returnStack.Clear();
+            }
+            finally
+            {
+                _closingEmbedded = false;
+            }
+        }
+
+        // Escや「戻る」で画面が閉じられたら、ひとつ前の表示へ戻る（無ければホーム）。
+        private void OnEmbeddedClosed(Form view)
+        {
+            if (_closingEmbedded)
+            {
+                return;
+            }
+
+            _embedded.Remove(view);
+            _body.Controls.Remove(view);
+            if (_current != view)
+            {
+                return;
+            }
+
+            while (_returnStack.Count > 0)
+            {
+                var back = _returnStack.Pop();
+                if (!back.Item1.IsDisposed && _body.Controls.Contains(back.Item1))
+                {
+                    ShowView(back.Item1, back.Item2);
+                    RefreshCurrent();
+                    return;
+                }
+            }
+
+            ShowHomeView();
+        }
+
+        private void RefreshCurrent()
+        {
+            if (_current == _homeView)
+            {
+                Reload();
+            }
+            else if (_current == _listView && _listView != null)
+            {
+                _listView.Reload();
+            }
+        }
+
+        /// <summary>案件画面を、本体の中に開く。閉じる（戻る）と、いま見ていた画面に戻る。</summary>
+        public void OpenAnken(long ankenId)
+        {
+            if (_current != null)
+            {
+                _returnStack.Push(Tuple.Create(_current, _currentNav));
+            }
+
+            AttachEmbedded(new AnkenDetailForm(_services, ankenId), _currentNav);
         }
 
         // ---- 左のメニュー ----
@@ -194,20 +296,25 @@ namespace AnkenDesk.App
             // Dockの積み順: あとから足したものが手前（上）に来るので、逆順に足す。
             var items = new List<Control>
             {
+                Section("案件"),
                 (_navHome = ViewNavButton("ホーム（要対応）", true, () => ShowHomeView())),
                 (_navList = ViewNavButton("案件一覧", false, () => ShowListView())),
-                NavButton("受信メールの自動仕分け", false, () => new TriageForm(_services).ShowDialog(this)),
-                NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
-                NavButton("横断検索", false, () => new SearchForm(_services).ShowDialog(this)),
-                NavButton("勝敗・粗利の集計", false, () => new ResultStatsForm(_services).ShowDialog(this)),
-                NavButton("既存フォルダを取り込む", false, () => new ImportFolderForm(_services).ShowDialog(this)),
-                (_navRemind = NavButton("催促が必要な案件", false, () => OpenReminderBatch())),
+                (_navRemind = ViewNavButton("催促が必要な案件", false, () => OpenReminderBatch())),
+                ViewNavForm("横断検索", () => new SearchForm(_services)),
+                Section("メール"),
+                ViewNavForm("受信メールの自動仕分け", () => new TriageForm(_services)),
+                ViewNavForm("受信メールから取り込む", () => new ImportMailForm(_services, null)),
+                Section("集計・出力"),
+                ViewNavForm("勝敗・粗利の集計", () => new ResultStatsForm(_services)),
                 NavButton("一覧をExcelに書き出す", false, () => ExportList()),
-                NavButton("調達先マスター", false, () => new SuppliersForm(_services).ShowDialog(this)),
-                NavButton("得意先・種別", false, () => new ClientsForm(_services).ShowDialog(this)),
-                NavButton("見積依頼書の既定値", false, () => new ItemDefaultsForm(_services).ShowDialog(this)),
+                Section("登録・管理"),
+                ViewNavForm("既存フォルダを取り込む", () => new ImportFolderForm(_services)),
+                ViewNavForm("調達先マスター", () => new SuppliersForm(_services)),
+                ViewNavForm("得意先・種別", () => new ClientsForm(_services)),
+                ViewNavForm("見積依頼書の既定値", () => new ItemDefaultsForm(_services)),
+                Section("設定"),
                 NavButton("Outlookの接続を確認", false, () => CheckOutlook()),
-                NavButton("設定・DBの控え", false, () => new SettingsForm(_services).ShowDialog(this)),
+                ViewNavForm("設定・DBの控え", () => new SettingsForm(_services)),
             };
             var spacer = new Panel { Dock = DockStyle.Top, Height = 16 };
 
@@ -230,6 +337,27 @@ namespace AnkenDesk.App
             b.Click += (s, e) => show();
             _viewNavs.Add(b);
             return b;
+        }
+
+        // 本体の中に、画面（Form）を開くメニュー。
+        private Button ViewNavForm(string text, Func<Form> create)
+        {
+            Button? self = null;
+            self = ViewNavButton(text, false, () => OpenEmbedded(create(), self));
+            return self;
+        }
+
+        private static Label Section(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Dock = DockStyle.Top,
+                Height = 30,
+                Padding = new Padding(6, 10, 0, 0),
+                ForeColor = Color.FromArgb(90, 96, 100),
+                Font = new Font("BIZ UDPGothic", 9.5F, FontStyle.Bold),
+            };
         }
 
         private Button NavButton(string text, bool selected, Action? action)
@@ -671,10 +799,7 @@ namespace AnkenDesk.App
                 return;
             }
 
-            using (var dlg = new ReminderBatchForm(_services, rows))
-            {
-                dlg.ShowDialog(this);
-            }
+            OpenEmbedded(new ReminderBatchForm(_services, rows), _navRemind);
         }
 
         // 今の絞り込み結果を、Excelに書き出す。保存先は、保存画面で選ぶ。
@@ -765,12 +890,7 @@ namespace AnkenDesk.App
                 return;
             }
 
-            using (var dlg = new AnkenDetailForm(_services, r.Anken.Id))
-            {
-                dlg.ShowDialog(this);
-            }
-
-            Reload();
+            OpenAnken(r.Anken.Id);
         }
     }
 }
