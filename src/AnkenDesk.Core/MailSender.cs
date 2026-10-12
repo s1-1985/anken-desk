@@ -39,7 +39,7 @@ namespace AnkenDesk.Core
         /// <summary>調達先ごとのメールを作る。件名・本文は雛形に差し込む。</summary>
         public static MailRequest BuildRequest(
             AnkenRecord anken, DateTime dueDate, Supplier supplier,
-            string subjectTemplate, string bodyTemplate, IEnumerable<string> attachments, bool includeSignature)
+            string subjectTemplate, string bodyTemplate, IEnumerable<string> attachments, bool includeSignature, string ccAddress = "")
         {
             var req = new MailRequest
             {
@@ -47,6 +47,7 @@ namespace AnkenDesk.Core
                 Subject = MailTemplates.Apply(subjectTemplate, supplier, anken, dueDate),
                 Body = MailTemplates.Apply(bodyTemplate, supplier, anken, dueDate),
                 IncludeSignature = includeSignature,
+                CcAddress = (ccAddress ?? "").Trim(),
             };
             req.Attachments.AddRange(attachments);
             return req;

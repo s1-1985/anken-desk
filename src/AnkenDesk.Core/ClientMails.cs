@@ -61,7 +61,7 @@ namespace AnkenDesk.Core
         /// </summary>
         public static ImportOutcome Import(
             IMailInbox inbox, AnkenDb db, AnkenRecord anken, string ankenFullPath, InboundMail mail,
-            IReadOnlyCollection<int> attachmentIndexes, bool saveMsg, bool recordNote, DateTime now)
+            IReadOnlyCollection<int> attachmentIndexes, bool saveMsg, bool recordNote, DateTime now, bool addCategory = false)
         {
             if (!Directory.Exists(ankenFullPath))
             {
@@ -138,6 +138,11 @@ namespace AnkenDesk.Core
             }
 
             Finish(db, anken, mail, msgSaved, body, outcome, now);
+            if (addCategory && (outcome.AnythingSaved || outcome.NoteRecorded))
+            {
+                outcome.Categorized = InboundImporter.TryCategorize(inbox, mail.EntryId);
+            }
+
             return outcome;
         }
 

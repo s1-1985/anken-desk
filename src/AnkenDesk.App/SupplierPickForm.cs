@@ -18,6 +18,7 @@ namespace AnkenDesk.App
         private readonly TextBox _search = new TextBox();
         private readonly HashSet<long> _checked = new HashSet<long>(); // 検索で絞っても、チェックを覚えておく
         private bool _reloading;
+        private readonly Dictionary<long, string> _summary = new Dictionary<long, string>();
 
         public List<Supplier> Chosen { get; } = new List<Supplier>();
 
@@ -26,10 +27,11 @@ namespace AnkenDesk.App
         {
             public Supplier Supplier = new Supplier();
             public bool Recent;
+            public string Summary = "";
 
             public override string ToString()
             {
-                return (Recent ? "★前回　" : "") + Supplier.Name + (string.IsNullOrWhiteSpace(Supplier.Specialty) ? "" : "　【" + Supplier.Specialty + "】");
+                return (Recent ? "★前回　" : "") + Supplier.Name + (string.IsNullOrWhiteSpace(Supplier.Specialty) ? "" : "　【" + Supplier.Specialty + "】") + (Summary.Length > 0 ? "　（" + Summary + "）" : "");
             }
         }
 
@@ -39,17 +41,22 @@ namespace AnkenDesk.App
             _services = services;
             _already = new HashSet<long>(alreadyAdded);
             _recent = recentSupplierIds ?? new List<long>();
+            foreach (var st in SupplierStats.Compute(services.Db.ListAllAnkenSuppliers(), id => services.Db.ListQuotes(id)))
+            {
+                _summary[st.SupplierId] = st.Summary();
+            }
+
             UiStyle.Apply(this);
             Text = "調達先を加える";
-            ClientSize = new Size(560, 520);
+            ClientSize = new Size(760, 520);
 
-            Controls.Add(new Label { Text = "見積を依頼する調達先を選んでください（下の欄で、名前・得意分野を検索できます）。", Left = 16, Top = 12, Width = 528, Height = 28 });
+            Controls.Add(new Label { Text = "見積を依頼する調達先を選んでください（下の欄で、名前・得意分野を検索できます）。かっこ内は、過去の実績です。", Left = 16, Top = 12, Width = 728, Height = 28 });
 
-            _search.SetBounds(16, 44, 528, 30);
+            _search.SetBounds(16, 44, 728, 30);
             _search.TextChanged += (s, e) => Reload();
             Controls.Add(_search);
 
-            _list.SetBounds(16, 80, 528, 324);
+            _list.SetBounds(16, 80, 728, 324);
             _list.CheckOnClick = true;
             _list.ItemCheck += (s, e) =>
             {
@@ -70,7 +77,7 @@ namespace AnkenDesk.App
             };
             Controls.Add(_list);
 
-            _hint.SetBounds(250, 414, 294, 40);
+            _hint.SetBounds(250, 414, 494, 40);
             Controls.Add(_hint);
 
             var manage = UiStyle.CreateButton("調達先マスター...", false, 200);
@@ -105,7 +112,7 @@ namespace AnkenDesk.App
             };
 
             var ok = UiStyle.CreateButton("加える", true, 120);
-            ok.Left = 288; ok.Top = 464;
+            ok.Left = 488; ok.Top = 464;
             ok.Click += (s, e) =>
             {
                 foreach (var sup in _services.Db.ListSuppliers().Where(x => _checked.Contains(x.Id)))
@@ -117,7 +124,7 @@ namespace AnkenDesk.App
             };
 
             var cancel = UiStyle.CreateButton("キャンセル", false, 130);
-            cancel.Left = 414; cancel.Top = 464;
+            cancel.Left = 614; cancel.Top = 464;
             cancel.Click += (s, e) => DialogResult = DialogResult.Cancel;
 
             Controls.AddRange(new Control[] { manage, ok, cancel });
@@ -131,7 +138,7 @@ namespace AnkenDesk.App
             var tokens = _search.Text.Split(new[] { ' ', '　' }, System.StringSplitOptions.RemoveEmptyEntries);
             var items = _services.Db.ListSuppliers().Where(x => !_already.Contains(x.Id))
                 .Where(x => tokens.All(t => (x.Name + " " + x.ShortName + " " + x.Specialty).IndexOf(t, System.StringComparison.OrdinalIgnoreCase) >= 0))
-                .Select(x => new Item { Supplier = x, Recent = _recent.Contains(x.Id) })
+                .Select(x => new Item { Supplier = x, Recent = _recent.Contains(x.Id), Summary = _summary.ContainsKey(x.Id) ? _summary[x.Id] : "" })
                 .OrderBy(i => i.Recent ? _recent.ToList().IndexOf(i.Supplier.Id) : int.MaxValue)
                 .ToList();
             foreach (var i in items)

@@ -200,6 +200,7 @@ namespace AnkenDesk.App
             var saveMsg = _saveMsg.Checked;
             var markReceived = _markReceived.Checked;
             var recordNote = _recordNote.Checked;
+            var markCategory = _services.MarkCategory;
 
             var confirm = new StringBuilder();
             confirm.AppendLine(chosen.Count + " 通のメールを、次のように取り込みます。");
@@ -217,7 +218,7 @@ namespace AnkenDesk.App
 
             confirm.AppendLine();
             confirm.AppendLine("添付は「5.調達先見積もり」へ（略称つきの名前、上書きしない）。"
-                + (saveMsg ? "メールは .msg でも保存。" : "") + (markReceived ? "回答受領日は、見積書（PDF・Excel）の添付があるものだけ入れる。" : "") + (recordNote ? "内容をメモに残す。" : ""));
+                + (saveMsg ? "メールは .msg でも保存。" : "") + (markReceived ? "回答受領日は、見積書（PDF・Excel）の添付があるものだけ入れる。" : "") + (recordNote ? "内容をメモに残す。" : "") + (markCategory ? "Outlookのメールにカテゴリ「" + InboundImporter.CategoryName + "」を付ける。" : ""));
             if (MessageBox.Show(this, confirm.ToString(), "取り込みの確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             {
                 return;
@@ -243,7 +244,7 @@ namespace AnkenDesk.App
                             try
                             {
                                 var outcome = InboundImporter.Import(inbox, services.Db, anken, System.IO.Path.Combine(workspace, anken.FolderPath), sup, p.Mail,
-                                    p.AttachmentIndexes, saveMsg, markReceived && p.HasQuoteAttachment ? (DateTime?)p.Mail.ReceivedAt.Date : null, DateTime.Now, recordNote || p.AttachmentIndexes.Count == 0);
+                                    p.AttachmentIndexes, saveMsg, markReceived && p.HasQuoteAttachment ? (DateTime?)p.Mail.ReceivedAt.Date : null, DateTime.Now, recordNote || p.AttachmentIndexes.Count == 0, markCategory);
                                 savedFiles.AddRange(outcome.SavedFiles);
                                 lines.Add((outcome.Errors.Count == 0 ? "○ " : "△ ") + Home.Title(anken) + " ← " + sup.ShortName + "：保存 " + outcome.SavedFiles.Count + " 件"
                                     + (outcome.Errors.Count > 0 ? "（失敗 " + outcome.Errors.Count + " 件: " + string.Join(" / ", outcome.Errors) + "）" : ""));

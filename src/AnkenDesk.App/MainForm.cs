@@ -29,6 +29,7 @@ namespace AnkenDesk.App
         private readonly Button _tabAnswered = new Button();
         private readonly Button _tabWeek = new Button();
         private readonly Button _tabClosed = new Button();
+        private readonly Button _tabExpiring = new Button();
         private Button? _navRemind;
         private Button? _navHome;
         private Button? _navList;
@@ -173,7 +174,7 @@ namespace AnkenDesk.App
 
         private Control BuildNav()
         {
-            var nav = new Panel { Dock = DockStyle.Left, Width = 250, BackColor = Color.White, Padding = new Padding(12) };
+            var nav = new Panel { Dock = DockStyle.Left, Width = 250, BackColor = Color.White, Padding = new Padding(12), AutoScroll = true };
 
             var brand = new Label
             {
@@ -198,6 +199,7 @@ namespace AnkenDesk.App
                 NavButton("受信メールの自動仕分け", false, () => new TriageForm(_services).ShowDialog(this)),
                 NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
                 NavButton("横断検索", false, () => new SearchForm(_services).ShowDialog(this)),
+                NavButton("勝敗・粗利の集計", false, () => new ResultStatsForm(_services).ShowDialog(this)),
                 NavButton("既存フォルダを取り込む", false, () => new ImportFolderForm(_services).ShowDialog(this)),
                 (_navRemind = NavButton("催促が必要な案件", false, () => OpenReminderBatch())),
                 NavButton("一覧をExcelに書き出す", false, () => ExportList()),
@@ -347,7 +349,9 @@ namespace AnkenDesk.App
             SetupTab(_tabAnswered, HomeFilter.Answered);
             SetupTab(_tabWeek, HomeFilter.DueThisWeek);
             SetupTab(_tabClosed, HomeFilter.Closed);
-            p.Controls.AddRange(new Control[] { _tabNeeds, _tabWeek, _tabAll, _tabAnswered, _tabClosed });
+            SetupTab(_tabExpiring, HomeFilter.QuoteExpiring);
+            _tabExpiring.Width = 160;
+            p.Controls.AddRange(new Control[] { _tabNeeds, _tabWeek, _tabAll, _tabAnswered, _tabExpiring, _tabClosed });
             return p;
         }
 
@@ -461,6 +465,7 @@ namespace AnkenDesk.App
             Tab(_tabAll, "すべて " + _allRows.Count, _filter == HomeFilter.All);
             Tab(_tabAnswered, "回答済み " + Home.Filter(_allRows, HomeFilter.Answered, null).Count, _filter == HomeFilter.Answered);
             Tab(_tabWeek, "今週期限 " + Home.Filter(_allRows, HomeFilter.DueThisWeek, null).Count, _filter == HomeFilter.DueThisWeek);
+            Tab(_tabExpiring, "見積の期限 " + Home.Filter(_allRows, HomeFilter.QuoteExpiring, null).Count, _filter == HomeFilter.QuoteExpiring);
             Tab(_tabClosed, "終了・保留 " + Home.Filter(_allRows, HomeFilter.Closed, null).Count, _filter == HomeFilter.Closed);
             if (_navRemind != null)
             {
@@ -475,9 +480,7 @@ namespace AnkenDesk.App
             {
                 var a = r.Anken;
                 var title = Home.Title(a) + (string.IsNullOrWhiteSpace(a.PartName) ? "" : "\r\n" + a.PartName);
-                var progress = r.Total == 0
-                    ? "調達先が未登録です"
-                    : r.Answered + "/" + r.Total + "社" + (r.PendingNames.Count > 0 ? "\r\n未回答: " + string.Join("、", r.PendingNames) : "");
+                var progress = r.ProgressText();
                 var idx = _grid.Rows.Add(
                     Home.StatusMark(r) + r.StatusText,
                     a.ReplyDueDate.ToString("MM/dd", CultureInfo.InvariantCulture) + "（" + DayName(a.ReplyDueDate) + "）",

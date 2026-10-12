@@ -12,13 +12,18 @@ namespace AnkenDesk.App
     {
         private readonly AppServices _services;
         private readonly TextBox _path;
+        private readonly TextBox _cc;
+        private readonly CheckBox _category;
+        private readonly TextBox _company;
+        private readonly TextBox _person;
+        private readonly TextBox _contact;
 
         public SettingsForm(AppServices services)
         {
             _services = services;
             UiStyle.Apply(this);
             Text = "設定・DBの控え";
-            ClientSize = new Size(720, 420);
+            ClientSize = new Size(720, 700);
 
             var help = new Label
             {
@@ -61,6 +66,29 @@ namespace AnkenDesk.App
                 Directory.CreateDirectory(dir);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + dir + "\"") { UseShellExecute = true });
             };
+
+            // Outlook・見積書の設定
+            var y = 340;
+            _cc = new TextBox { Left = 16, Top = y + 28, Width = 688, Text = services.DefaultCc };
+            _category = new CheckBox
+            {
+                Left = 16, Top = y + 70, Width = 688, Height = 30, Checked = services.MarkCategory,
+                Text = "取り込んだメールに、Outlookのカテゴリ「" + InboundImporter.CategoryName + "」を付ける",
+            };
+            _company = new TextBox { Left = 16, Top = y + 134, Width = 340, Text = services.CompanyName };
+            _person = new TextBox { Left = 364, Top = y + 134, Width = 340, Text = services.PersonName };
+            _contact = new TextBox { Left = 16, Top = y + 196, Width = 688, Text = services.Contact };
+            Controls.AddRange(new Control[]
+            {
+                new Label { Text = "見積依頼メールのCC（既定。空なら付けません。複数は「;」で区切る）", Left = 16, Top = y, Width = 688, Height = 24 },
+                _cc, _category,
+                new Label { Text = "客先見積書に載せる自社名", Left = 16, Top = y + 108, Width = 340, Height = 24 },
+                new Label { Text = "担当者名", Left = 364, Top = y + 108, Width = 340, Height = 24 },
+                _company, _person,
+                new Label { Text = "連絡先（電話・メールなど）", Left = 16, Top = y + 170, Width = 688, Height = 24 },
+                _contact,
+            });
+            save.Top = 640; cancel.Top = 640;
 
             Controls.AddRange(new Control[] { help, _path, browse, reset, backupHelp, restore, openBackup, save, cancel });
         }
@@ -151,6 +179,17 @@ namespace AnkenDesk.App
                 }
             }
 
+            if (_cc.Text.Trim().Length > 0 && !MailSender.IsValidAddressList(_cc.Text))
+            {
+                MessageBox.Show(this, "CCのメールアドレスが不正です（複数のときは「;」で区切ります）。", "設定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            _services.DefaultCc = _cc.Text;
+            _services.MarkCategory = _category.Checked;
+            _services.CompanyName = _company.Text;
+            _services.PersonName = _person.Text;
+            _services.Contact = _contact.Text;
             _services.WorkspaceRoot = path;
             DialogResult = DialogResult.OK;
         }

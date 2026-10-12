@@ -42,6 +42,16 @@ namespace AnkenDesk.App
             var saved = services.Db.ListClientPrices(anken.Id);
             var cheapest = Comparison.CheapestQuotes(_quotes);
 
+            IReadOnlyDictionary<string, PreviousPrice> prevSelling;
+            try
+            {
+                prevSelling = PriceHistory.PreviousSelling(services.Db, anken);
+            }
+            catch (InvalidOperationException)
+            {
+                prevSelling = new Dictionary<string, PreviousPrice>();
+            }
+
             UiStyle.Apply(this);
             Text = "提出単価と粗利　" + Home.Title(anken);
             ClientSize = new Size(1180, Math.Min(760, 300 + patterns.Count * 52));
@@ -93,6 +103,16 @@ namespace AnkenDesk.App
                 if (sv != null && sv.SellingPrice.HasValue)
                 {
                     row.Selling.Text = sv.SellingPrice.Value.ToString("0.####", CultureInfo.InvariantCulture);
+                }
+
+                PreviousPrice prev;
+                if (prevSelling.TryGetValue(ExcelExports.PatternText(p), out prev))
+                {
+                    Controls.Add(new Label
+                    {
+                        Text = "前回の提出単価 " + Comparison.FormatPrice(prev.Price) + "（" + prev.Date.ToString("yyyy/MM", CultureInfo.InvariantCulture) + "）",
+                        Left = xs[3], Top = y + 32, Width = 360, Height = 18, Font = new Font("BIZ UDPGothic", 9F), ForeColor = Color.FromArgb(90, 96, 100),
+                    });
                 }
 
                 var r = row;

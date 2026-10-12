@@ -46,6 +46,7 @@ namespace AnkenDesk.App
         private readonly TextBox _body = new TextBox();
         private readonly DateTimePicker _due = new DateTimePicker { Format = DateTimePickerFormat.Short };
         private readonly CheckBox _signature = new CheckBox();
+        private readonly TextBox _cc = new TextBox();
         private readonly TextBox _preview = new TextBox();
         private readonly ComboBox _previewWho = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private bool _updatingWho;
@@ -150,7 +151,7 @@ namespace AnkenDesk.App
             _subject.SetBounds(12, 66, 416, 32);
             p.Controls.Add(_subject);
             p.Controls.Add(new Label { Text = "本文", Left = 12, Top = 106, Width = 200, Height = 22 });
-            _body.SetBounds(12, 130, 416, h - 190 - 130 - 200);
+            _body.SetBounds(12, 130, 416, h - 190 - 130 - 244);
             _body.Multiline = true;
             _body.AcceptsReturn = true;
             _body.ScrollBars = ScrollBars.Vertical;
@@ -158,6 +159,14 @@ namespace AnkenDesk.App
             p.Controls.Add(_body);
 
             var y = h - 190 - 190;
+            var ccLabel = new Label { Text = "CC", Left = 12, Top = y - 42, Width = 40, Height = 24 };
+            ccLabel.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            _cc.SetBounds(56, y - 46, 372, 32);
+            _cc.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            _cc.Text = _services.DefaultCc;
+            _cc.TextChanged += (s, e) => UpdatePreview();
+            p.Controls.Add(ccLabel);
+            p.Controls.Add(_cc);
             var help = new Label
             {
                 Text = "差し込み: " + string.Join(" ", MailTemplates.Placeholders) + "（調達先ごとに入れ替わります）",
@@ -342,6 +351,11 @@ namespace AnkenDesk.App
                 problems.Add("メールアドレスが未登録・不正な調達先があります: " + string.Join("、", bad) + "（調達先マスターで直してください）");
             }
 
+            if (_cc.Text.Trim().Length > 0 && !MailSender.IsValidAddressList(_cc.Text))
+            {
+                problems.Add("CCのメールアドレスが不正です（複数のときは「;」で区切ります）。");
+            }
+
             _problem.Text = problems.Count == 0 ? "" : "警告: " + string.Join("　", problems);
             var ok = problems.Count == 0;
             _send.Enabled = ok;
@@ -395,6 +409,11 @@ namespace AnkenDesk.App
             confirm.AppendLine();
             confirm.AppendLine("件名: " + MailTemplates.Apply(_subject.Text, selected[0].Master, _anken, _due.Value.Date));
             confirm.AppendLine("添付: " + (attachNames.Count == 0 ? "なし" : string.Join("、", attachNames)));
+            if (_cc.Text.Trim().Length > 0)
+            {
+                confirm.AppendLine("CC: " + _cc.Text.Trim());
+            }
+
             confirm.AppendLine("署名: " + (_signature.Checked ? "入れる" : "入れない"));
             var ok = MessageBox.Show(this, confirm.ToString(), send ? "送信の確認" : "下書きの確認",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
@@ -426,7 +445,7 @@ namespace AnkenDesk.App
 
             var items = selected
                 .Select(s => new KeyValuePair<Supplier, MailRequest>(s.Master,
-                    MailSender.BuildRequest(_anken, _due.Value.Date, s.Master, _subject.Text, _body.Text, attachments, _signature.Checked)))
+                    MailSender.BuildRequest(_anken, _due.Value.Date, s.Master, _subject.Text, _body.Text, attachments, _signature.Checked, _cc.Text)))
                 .ToList();
 
             try

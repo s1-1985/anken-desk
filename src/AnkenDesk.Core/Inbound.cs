@@ -75,6 +75,9 @@ namespace AnkenDesk.Core
         /// <summary>メールの内容をメモに残したか。</summary>
         public bool NoteRecorded { get; set; }
 
+        /// <summary>Outlookのメールにカテゴリ「案件デスク」を付けたか（付けられなくても、取り込みは成功）。</summary>
+        public bool Categorized { get; set; }
+
         public bool AnythingSaved
         {
             get { return SavedFiles.Count > 0 || MsgPath != null; }
@@ -112,10 +115,23 @@ namespace AnkenDesk.Core
                 + "\n件名: " + mail.Subject + "\n\n" + text;
         }
 
+        /// <summary>メールにカテゴリを付ける。付けられなくても、例外にしない（取り込みの成否に関係ない）。</summary>
+        public static bool TryCategorize(IMailInbox inbox, string entryId)
+        {
+            try
+            {
+                return inbox.AddCategory(entryId, CategoryName);
+            }
+            catch (Exception ex) when (!(ex is OutOfMemoryException))
+            {
+                return false;
+            }
+        }
+
         public static ImportOutcome Import(
             IMailInbox inbox, AnkenDb db, AnkenRecord anken, string ankenFullPath, Supplier supplier, InboundMail mail,
             IReadOnlyCollection<int> attachmentIndexes, bool saveMsg, DateTime? markReceivedDate, DateTime now,
-            bool recordBodyAsNote = false)
+            bool recordBodyAsNote = false, bool addCategory = false)
         {
             if (!Directory.Exists(ankenFullPath))
             {
@@ -214,6 +230,11 @@ namespace AnkenDesk.Core
                 {
                     db.MarkAnswerReceived(anken.Id, supplier.Id, markReceivedDate.Value.Date);
                     outcome.ReceivedDateMarked = true;
+                }
+
+                if (addCategory)
+                {
+                    outcome.Categorized = TryCategorize(inbox, mail.EntryId);
                 }
             }
 

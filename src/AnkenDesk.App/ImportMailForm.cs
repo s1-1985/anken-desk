@@ -535,6 +535,7 @@ namespace AnkenDesk.App
             }
 
             var services = _services;
+            var markCategory = _services.MarkCategory;
             var ankenRec = anken.Anken;
             ImportOutcome outcome;
             try
@@ -543,7 +544,7 @@ namespace AnkenDesk.App
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return ClientMailImporter.Import(inbox, services.Db, ankenRec, full, mail, indexes, saveMsg, recordNote, DateTime.Now);
+                        return ClientMailImporter.Import(inbox, services.Db, ankenRec, full, mail, indexes, saveMsg, recordNote, DateTime.Now, markCategory);
                     }
                 });
             }
@@ -645,6 +646,7 @@ namespace AnkenDesk.App
             }
 
             var services = _services;
+            var markCategory = _services.MarkCategory;
             var master = supplier.Master;
             var ankenRec = anken.Anken;
             ImportOutcome outcome;
@@ -654,7 +656,7 @@ namespace AnkenDesk.App
                 {
                     using (var inbox = new OutlookInbox())
                     {
-                        return InboundImporter.Import(inbox, services.Db, ankenRec, full, master, mail, indexes, saveMsg, received, DateTime.Now, recordNote);
+                        return InboundImporter.Import(inbox, services.Db, ankenRec, full, master, mail, indexes, saveMsg, received, DateTime.Now, recordNote, markCategory);
                     }
                 });
             }
@@ -682,6 +684,11 @@ namespace AnkenDesk.App
             if (outcome.NoteRecorded)
             {
                 sb.AppendLine("メールの内容を、メモに残しました。");
+            }
+
+            if (outcome.Categorized)
+            {
+                sb.AppendLine("Outlookのメールにカテゴリ「" + InboundImporter.CategoryName + "」を付けました。");
             }
 
             if (outcome.ReceivedDateMarked)

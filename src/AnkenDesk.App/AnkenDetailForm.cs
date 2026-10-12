@@ -98,6 +98,9 @@ namespace AnkenDesk.App
                 }
             };
 
+            var response = ToolButton("辞退・検討中を設定", false, 938, 108, 220);
+            response.Click += (s, e) => SetResponse();
+
             // 4段目: 案件の状態、比較表のExcel、外した調達先を戻す、この案件を元に登録、プレビュー欄
             var statusCaption = new Label { Text = "状態", Left = 16, Top = 164, Width = 50, Height = 28 };
             _statusBox.SetBounds(68, 160, 170, 32);
@@ -131,6 +134,10 @@ namespace AnkenDesk.App
 
             var calendar = ToolButton("回答期限をOutlookの予定表へ", false, 788, 204, 280);
             calendar.Click += (s, e) => SyncCalendar();
+            var checks = ToolButton("比較表をチェック", false, 1076, 204, 200);
+            checks.Click += (s, e) => RunChecks();
+            var clientQuote = ToolButton("客先見積書を作成", false, 1112, 156, 172);
+            clientQuote.Click += (s, e) => MakeClientQuote();
 
             _hint.SetBounds(16, 252, 1268, 24);
             _hint.ForeColor = Color.FromArgb(90, 96, 100);
@@ -236,7 +243,7 @@ namespace AnkenDesk.App
             _history.SelectionMode = SelectionMode.One;
             _history.DoubleClick += (s, e) => OpenHistoryMsg();
 
-            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, calendar, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
+            Controls.AddRange(new Control[] { _title, editAnken, makeRequest, open, mailRequest, mailReminder, importMail, gallery, statusCaption, _statusBox, exportXlsx, restore, copyNew, togglePreview, _notesButton, similar, pricing, result, calendar, checks, clientQuote, response, add, input, requote, history, remove, saveFile, preview, _hint, band, folderPanel, _grid, historyTitle, _status, _history });
 
             Controls.Add(_previewPanel);
             _grid.CurrentCellChanged += (s, e) => UpdatePreviewPanel();
@@ -292,7 +299,7 @@ namespace AnkenDesk.App
             int answered, total;
             Comparison.Progress(_suppliers.ToList(), out answered, out total);
             var due = a.ReplyDueDate.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
-            _dueDate.Text = (total > 0 && answered == total)
+            _dueDate.Text = (total > 0 && answered > 0 && !_suppliers.Any(x => x.IsPending))
                 ? due + "（全社回答済み）"
                 : due + "（" + Comparison.DueStatus(a.ReplyDueDate, DateTime.Today) + "）";
             if (total == 0)
@@ -301,8 +308,9 @@ namespace AnkenDesk.App
             }
             else
             {
-                var pending = _suppliers.Where(s => !s.IsAnswered).Select(s => s.ShortName).ToList();
-                _progress.Text = answered + "/" + total + "社" + (pending.Count > 0 ? "（未回答: " + string.Join("、", pending) + "）" : "");
+                var declined = _suppliers.Count(s => s.IsDeclined && !s.IsAnswered);
+                var pending = _suppliers.Where(s => s.IsPending).Select(s => s.ShortName + (s.IsConsidering ? "（検討中）" : "")).ToList();
+                _progress.Text = answered + "/" + total + "社" + (declined > 0 ? "（辞退" + declined + "）" : "") + (pending.Count > 0 ? "（未回答: " + string.Join("、", pending) + "）" : "");
             }
 
             ReloadFolders();
@@ -330,7 +338,7 @@ namespace AnkenDesk.App
             head.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var s in _suppliers)
             {
-                var col = _grid.Columns[_grid.Columns.Add("s" + s.SupplierId, s.ShortName + "\r\n" + (s.IsAnswered ? "回答済み" : "未回答"))];
+                var col = _grid.Columns[_grid.Columns.Add("s" + s.SupplierId, s.ShortName + "\r\n" + SupplierStateText(s))];
                 col.Width = 200;
                 col.Tag = s;
                 col.SortMode = DataGridViewColumnSortMode.NotSortable;
@@ -338,6 +346,15 @@ namespace AnkenDesk.App
 
             var cheapest = new HashSet<string>(Comparison.CheapestQuotes(quotes).Select(q => Key(q.PatternId, q.SupplierId)));
             var breakdowns = _services.Db.ListBreakdowns(_ankenId);
+            IReadOnlyDictionary<string, PreviousPrice> previous;
+            try
+            {
+                previous = PriceHistory.PreviousQuotes(_services.Db, _anken);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
+            {
+                previous = new Dictionary<string, PreviousPrice>();
+            }
 
             foreach (var p in patterns)
             {
@@ -349,13 +366,15 @@ namespace AnkenDesk.App
                     var isCheapest = q != null && cheapest.Contains(Key(p.Id, s.SupplierId));
                     IReadOnlyList<BreakdownLine>? bd;
                     breakdowns.TryGetValue(new KeyValuePair<long, long>(s.SupplierId, p.Id), out bd);
-                    cells.Add(QuoteText(q, s, isCheapest, bd));
+                    cells.Add(QuoteText(q, s, isCheapest, bd, previous, ExcelExports.PatternText(p)));
                     styles.Add(isCheapest);
                 }
 
                 AddRow(cells, styles);
             }
 
+            AddTextRow("返事の状況", s => ResponseText(s));
+            AddTextRow("見積の有効期限", s => QuoteValidity.Text(s, DateTime.Today));
             AddTextRow("別費用（型・治具）", s => s.ExtraCost);
             AddTextRow("緩和条件", s => s.Relaxation);
             AddTextRow("備考", s => s.Note);
@@ -364,16 +383,37 @@ namespace AnkenDesk.App
             AddTextRow("見積書PDF（5番のフォルダ内）", s => QuotePdfNames(s));
         }
 
+        private static string SupplierStateText(AnkenSupplier s)
+        {
+            return s.IsAnswered ? "回答済み" : s.IsDeclined ? "辞退" : s.IsConsidering ? "検討中" : "未回答";
+        }
+
+        private static string ResponseText(AnkenSupplier s)
+        {
+            if (s.IsAnswered)
+            {
+                return "";
+            }
+
+            if (s.IsDeclined)
+            {
+                return "辞退" + (string.IsNullOrWhiteSpace(s.DeclineReason) ? "" : "：" + s.DeclineReason);
+            }
+
+            return s.IsConsidering ? "検討中" + (s.PromisedDate.HasValue ? "（" + s.PromisedDate.Value.ToString("M/d", CultureInfo.InvariantCulture) + "までに回答予定）" : "") : "";
+        }
+
         private static string Key(long patternId, long supplierId)
         {
             return patternId + ":" + supplierId;
         }
 
-        private static string QuoteText(Quote? q, AnkenSupplier s, bool isCheapest, IReadOnlyList<BreakdownLine>? breakdown = null)
+        private static string QuoteText(Quote? q, AnkenSupplier s, bool isCheapest, IReadOnlyList<BreakdownLine>? breakdown = null,
+            IReadOnlyDictionary<string, PreviousPrice>? previous = null, string patternText = "")
         {
             if (q == null)
             {
-                return s.IsAnswered ? "—" : "—\r\n（未回答）";
+                return s.IsAnswered ? "—" : s.IsDeclined ? "—\r\n（辞退）" : s.IsConsidering ? "—\r\n（検討中）" : "—\r\n（未回答）";
             }
 
             var lines = new List<string>();
@@ -384,6 +424,12 @@ namespace AnkenDesk.App
 
             lines.Add(q.UnitPrice.HasValue ? Comparison.FormatPrice(q.UnitPrice.Value) : "単価なし");
             lines.Add(q.LeadTimeDays.HasValue ? "LT " + q.LeadTimeDays.Value + "日" : "LTなし");
+            PreviousPrice prev;
+            if (previous != null && q.UnitPrice.HasValue && previous.TryGetValue(PriceHistory.QuoteKey(s.SupplierId, patternText), out prev))
+            {
+                lines.Add(PreviousPrice.Format(prev, q.UnitPrice));
+            }
+
             if (breakdown != null && breakdown.Count > 0)
             {
                 // 内訳の先頭の2行だけ。全部は「回答を入力・変更」の「内訳」で見られる。
@@ -567,6 +613,66 @@ namespace AnkenDesk.App
             using (var dlg = new QuoteEditForm(_services, s, patterns, _services.Db.ListQuotes(_ankenId)))
             {
                 dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void SetResponse()
+        {
+            var s = SelectedSupplier();
+            if (s == null)
+            {
+                return;
+            }
+
+            using (var dlg = new ResponseStatusForm(_services, s))
+            {
+                dlg.ShowDialog(this);
+            }
+
+            Reload();
+        }
+
+        private void RunChecks()
+        {
+            var patterns = _services.Db.ListQuantities(_ankenId);
+            if (_suppliers.Count == 0 || patterns.Count == 0)
+            {
+                MessageBox.Show(this, "調達先と見積依頼数量が要ります。", "比較表のチェック", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var warnings = QuoteChecks.Run(patterns, _suppliers, _services.Db.ListQuotes(_ankenId), DateTime.Today);
+            using (var dlg = new QuoteChecksForm(Home.Title(_anken), warnings))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void MakeClientQuote()
+        {
+            using (var dlg = new ClientQuoteForm(_services, _anken))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SavedPath == null)
+                {
+                    return;
+                }
+
+                SetStatus("客先見積書を保存しました: " + Path.GetFileName(dlg.SavedPath));
+                var open = MessageBox.Show(this, "客先見積書を保存しました。\r\n\r\n" + dlg.SavedPath + "\r\n\r\nExcelで開きますか？",
+                    "客先見積書", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (open == DialogResult.Yes)
+                {
+                    try
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dlg.SavedPath) { UseShellExecute = true });
+                    }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException)
+                    {
+                        MessageBox.Show(this, "開けませんでした。\r\n\r\n" + ex.Message, "客先見積書", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
             }
 
             Reload();

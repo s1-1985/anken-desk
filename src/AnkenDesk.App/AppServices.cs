@@ -60,6 +60,39 @@ namespace AnkenDesk.App
                 "案件デスク検証");
         }
 
+        /// <summary>見積依頼メールのCC（空なら付けない。「;」区切りで複数）。</summary>
+        public string DefaultCc
+        {
+            get { return Db.GetSetting("default_cc") ?? ""; }
+            set { Db.SetSetting("default_cc", (value ?? "").Trim()); }
+        }
+
+        /// <summary>取り込んだメールに、Outlookのカテゴリ「案件デスク」を付けるか（初期値: 付けない）。</summary>
+        public bool MarkCategory
+        {
+            get { return Db.GetSetting("mark_category") == "1"; }
+            set { Db.SetSetting("mark_category", value ? "1" : "0"); }
+        }
+
+        /// <summary>客先見積書に載せる、自社の名前・担当者・連絡先。</summary>
+        public string CompanyName
+        {
+            get { return Db.GetSetting("my_company") ?? ""; }
+            set { Db.SetSetting("my_company", (value ?? "").Trim()); }
+        }
+
+        public string PersonName
+        {
+            get { return Db.GetSetting("my_person") ?? ""; }
+            set { Db.SetSetting("my_person", (value ?? "").Trim()); }
+        }
+
+        public string Contact
+        {
+            get { return Db.GetSetting("my_contact") ?? ""; }
+            set { Db.SetSetting("my_contact", (value ?? "").Trim()); }
+        }
+
         public bool IsDefaultWorkspace
         {
             get { return string.Equals(WorkspaceRoot, DefaultWorkspaceRoot(), StringComparison.OrdinalIgnoreCase); }

@@ -24,6 +24,7 @@ namespace AnkenDesk.App
         private readonly List<Row> _rows = new List<Row>();
         private readonly DateTimePicker _sent = new DateTimePicker { Format = DateTimePickerFormat.Short, ShowCheckBox = true };
         private readonly DateTimePicker _received = new DateTimePicker { Format = DateTimePickerFormat.Short, ShowCheckBox = true };
+        private readonly DateTimePicker _valid = new DateTimePicker { Format = DateTimePickerFormat.Short, ShowCheckBox = true };
         private readonly TextBox _extra = new TextBox();
         private readonly TextBox _relax = new TextBox();
         private readonly TextBox _note = new TextBox();
@@ -131,16 +132,19 @@ namespace AnkenDesk.App
             var y = 56 + 40 * (patterns.Count + 1) + 24;
             AddLabeled("依頼送付日", _sent, 16, y, 200);
             AddLabeled("回答受領日（入れると「回答済み」になります）", _received, 300, y, 200);
+            AddLabeled("見積の有効期限（わかれば）", _valid, 620, y, 200);
             AddLabeled("別費用（型・治具など）", _extra, 16, y + 70, 720);
             AddLabeled("緩和条件", _relax, 16, y + 140, 720);
             AddLabeled("備考", _note, 16, y + 210, 720);
 
+            if (answer.ValidUntil.HasValue) { _valid.Value = answer.ValidUntil.Value; _valid.Checked = true; } else { _valid.Checked = false; }
             if (answer.SentAt.HasValue) { _sent.Value = answer.SentAt.Value; _sent.Checked = true; } else { _sent.Checked = false; }
             if (requote)
             {
                 // 出し直し: 受領日は今日から。別費用・緩和条件・備考は新しい回答として空から入れる（旧版は履歴に残る）。
                 _received.Value = DateTime.Today;
                 _received.Checked = true;
+                _valid.Checked = false;
             }
             else
             {
@@ -287,6 +291,7 @@ namespace AnkenDesk.App
 
             _answer.SentAt = _sent.Checked ? _sent.Value.Date : (DateTime?)null;
             _answer.ReceivedAt = _received.Checked ? _received.Value.Date : (DateTime?)null;
+            _answer.ValidUntil = _valid.Checked ? _valid.Value.Date : (DateTime?)null;
             _answer.ExtraCost = _extra.Text;
             _answer.Relaxation = _relax.Text;
             _answer.Note = _note.Text;
