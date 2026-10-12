@@ -40,6 +40,22 @@ namespace AnkenDesk.Core.Tests
             new KeyValuePair<long, AnkenSupplier[]>(id, sups);
 
         [Fact]
+        public void 催促の相手は_依頼を送ったのに未回答の調達先だけ()
+        {
+            var sent = new DateTime(2026, 10, 1);
+            var a = new AnkenSupplier { SupplierId = 1, SupplierName = "甲", ShortName = "甲", SentAt = sent };                                   // 送付済み・未回答
+            var b = new AnkenSupplier { SupplierId = 2, SupplierName = "乙", ShortName = "乙", SentAt = sent, ReceivedAt = new DateTime(2026, 10, 3) }; // 回答済み
+            var c = new AnkenSupplier { SupplierId = 3, SupplierName = "丙", ShortName = "丙" };                                                 // まだ依頼していない
+            var rows = Home.Build(new[] { Anken(1, "P1", Today.AddDays(2)), Anken(2, "P2", Today.AddDays(2)) },
+                Map(S(1, a, b, c), S(2, c)), Today);
+
+            var r1 = rows.Single(r => r.Anken.Id == 1);
+            Assert.True(r1.CanRemind);
+            Assert.Equal(new long[] { 1 }, r1.RemindSupplierIds.ToArray());
+            Assert.False(rows.Single(r => r.Anken.Id == 2).CanRemind);
+        }
+
+        [Fact]
         public void 要対応は未回答の調達先がある案件で期限の近い順に並ぶ()
         {
             var rows = Home.Build(

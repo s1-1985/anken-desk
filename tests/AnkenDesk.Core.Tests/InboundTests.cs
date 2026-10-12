@@ -56,6 +56,36 @@ namespace AnkenDesk.Core.Tests
         // ---- 取り込み ----
 
         [Fact]
+        public void カテゴリは設定したときだけ付け_付けられなくても取り込みは成功する()
+        {
+            using (var e = new Env())
+            using (var inbox = new FakeMailInbox())
+            {
+                var off = InboundImporter.Import(inbox, e.Db, e.Anken, e.AnkenFull, e.A, Env.Mail(), new[] { 1 }, false, null, Now);
+                Assert.False(off.Categorized);
+                Assert.Empty(inbox.Categorized);
+
+                var on = InboundImporter.Import(inbox, e.Db, e.Anken, e.AnkenFull, e.A, Env.Mail(), new[] { 2 }, false, null, Now, false, true);
+                Assert.True(on.Categorized);
+                Assert.Equal(new[] { "E1|案件デスク" }, inbox.Categorized.ToArray());
+
+                Assert.False(InboundImporter.TryCategorize(new ThrowingCategoryInbox(), "E1")); // 例外でも、取り込みは止めない
+            }
+        }
+
+        private sealed class ThrowingCategoryInbox : IMailInbox
+        {
+            public IReadOnlyList<InboundMail> ListRecent(int days, int maxCount, bool sent = false) { return new List<InboundMail>(); }
+            public void SaveAttachment(string entryId, int attachmentIndex, string path) { }
+            public void SaveAsMsg(string entryId, string path) { }
+            public IReadOnlyList<InboundMail> GetSelected(int maxCount) { return new List<InboundMail>(); }
+            public bool AddCategory(string entryId, string category) { throw new InvalidOperationException("x"); }
+            public string? GetConversationId(string entryId) { return null; }
+            public string ReadBody(string entryId, int maxChars) { return ""; }
+            public void Dispose() { }
+        }
+
+        [Fact]
         public void 添付を略称つきの名前で5番のフォルダへ保存しmsgをメールのフォルダへ保存する()
         {
             using (var e = new Env())

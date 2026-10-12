@@ -13,6 +13,15 @@ namespace AnkenDesk.Core
 
         /// <summary>回答済み: 調達先が1社以上あり、全社が回答済みの案件。</summary>
         Answered,
+
+        /// <summary>今週期限: 要対応のうち、回答期限が今日から7日以内（期限超過も含む）。</summary>
+        DueThisWeek,
+
+        /// <summary>終了・保留: 受注・失注・保留にした案件。</summary>
+        Closed,
+
+        /// <summary>見積の期限: 回答済みの見積に、有効期限が切れた・7日以内に切れるものがある案件（終わった案件を除く）。</summary>
+        QuoteExpiring,
     }
 
     /// <summary>ホームの一覧の1行（1案件）。</summary>
@@ -21,6 +30,21 @@ namespace AnkenDesk.Core
         public AnkenRecord Anken { get; set; } = new AnkenRecord();
         public int Answered { get; set; }
         public int Total { get; set; }
+
+        /// <summary>辞退した調達先の数（回答待ちにも、催促にも数えない）。</summary>
+        public int Declined { get; set; }
+
+        /// <summary>回答待ちの調達先の数（回答済みでも、辞退でもない）。</summary>
+        public int Pending
+        {
+            get { return Math.Max(0, Total - Answered - Declined); }
+        }
+
+        /// <summary>未回答の調達先の、表示用の文字（「乙（検討中 10/15まで）」など）。無ければ <see cref="PendingNames"/>。</summary>
+        public IReadOnlyList<string> PendingDetail { get; set; } = new List<string>();
+
+        /// <summary>見積の有効期限の注意（「甲: 10/20まで（あと3日）」「乙: 有効期限切れ（5日前）」）。</summary>
+        public IReadOnlyList<string> QuoteAlerts { get; set; } = new List<string>();
 
         /// <summary>回答期限までの日数。期限を過ぎていれば負の数。</summary>
         public int DaysToDue { get; set; }
@@ -31,14 +55,53 @@ namespace AnkenDesk.Core
         /// <summary>この案件に加えてある調達先の名前と略称（検索用）。</summary>
         public IReadOnlyList<string> SupplierNames { get; set; } = new List<string>();
 
-        public bool NeedsAction
+        /// <summary>見積依頼を送った（依頼送付日がある）のに、まだ回答が無い調達先。催促の相手。</summary>
+        public IReadOnlyList<long> RemindSupplierIds { get; set; } = new List<long>();
+
+        /// <summary>次の操作が「催促メールを作成」になる。</summary>
+        public bool CanRemind
         {
-            get { return Total > 0 && Answered < Total; }
+            get { return RemindSupplierIds.Count > 0; }
         }
 
+        public bool NeedsAction
+        {
+            get { return !AnkenStatus.IsClosed(Anken.Status) && Total > 0 && Pending > 0; }
+        }
+
+        /// <summary>回答待ちが無く、1社以上が回答済み（残りは辞退）。</summary>
         public bool IsAnswered
         {
-            get { return Total > 0 && Answered == Total; }
+            get { return Total > 0 && Pending == 0 && Answered > 0; }
+        }
+
+        /// <summary>全社が辞退した。</summary>
+        public bool AllDeclined
+        {
+            get { return Total > 0 && Pending == 0 && Answered == 0 && Declined > 0; }
+        }
+
+        /// <summary>回答状況の文字（例: 「1/3社（辞退1）」。未回答があれば「未回答: 乙」を続ける）。</summary>
+        public string ProgressText(bool multiline = true)
+        {
+            if (Total == 0)
+            {
+                return "調達先が未登録です";
+            }
+
+            var text = Answered + "/" + Total + "社" + (Declined > 0 ? "（辞退" + Declined + "）" : "");
+            var pending = PendingDetail.Count > 0 ? PendingDetail : PendingNames;
+            if (pending.Count > 0)
+            {
+                text += (multiline ? "\r\n" : "　") + "未回答: " + string.Join("、", pending);
+            }
+
+            if (QuoteAlerts.Count > 0)
+            {
+                text += (multiline ? "\r\n" : "　") + "見積の期限: " + string.Join("、", QuoteAlerts);
+            }
+
+            return text;
         }
 
         /// <summary>状態を文字で返す（色だけに頼らない）。</summary>
@@ -46,9 +109,19 @@ namespace AnkenDesk.Core
         {
             get
             {
+                if (AnkenStatus.IsClosed(Anken.Status))
+                {
+                    return Anken.Status;
+                }
+
                 if (Total == 0)
                 {
                     return "依頼先なし";
+                }
+
+                if (AllDeclined)
+                {
+                    return "全社辞退";
                 }
 
                 if (IsAnswered)
@@ -93,13 +166,20 @@ namespace AnkenDesk.Core
                     list = new List<AnkenSupplier>();
                 }
 
+                var closed = AnkenStatus.IsClosed(a.Status);
                 rows.Add(new HomeRow
                 {
                     Anken = a,
                     Total = list.Count,
                     Answered = list.Count(s => s.IsAnswered),
+                    Declined = list.Count(s => s.IsDeclined),
                     DaysToDue = (a.ReplyDueDate.Date - today.Date).Days,
-                    PendingNames = list.Where(s => !s.IsAnswered).Select(s => s.ShortName).ToList(),
+                    PendingNames = list.Where(s => s.IsPending).Select(s => s.ShortName).ToList(),
+                    PendingDetail = list.Where(s => s.IsPending).Select(s => PendingText(s)).ToList(),
+                    // 催促の相手: 依頼を送った、回答待ち（辞退は除く）。検討中で回答予定日がまだ先なら、待つ。
+                    RemindSupplierIds = list.Where(s => s.IsPending && s.SentAt != null && !(s.IsConsidering && s.PromisedDate.HasValue && s.PromisedDate.Value.Date >= today.Date))
+                        .Select(s => s.SupplierId).ToList(),
+                    QuoteAlerts = closed ? new List<string>() : QuoteValidity.Alerts(list, today).Select(x => x.Text).ToList(),
                     SupplierNames = list.SelectMany(s => new[] { s.SupplierName, s.ShortName }).Distinct().ToList(),
                 });
             }
@@ -110,6 +190,17 @@ namespace AnkenDesk.Core
                 .ThenByDescending(r => r.Anken.RequestDate)
                 .ThenByDescending(r => r.Anken.Id)
                 .ToList();
+        }
+
+        // 回答待ちの調達先の表示: 検討中なら、回答予定日を添える。
+        private static string PendingText(AnkenSupplier s)
+        {
+            if (s.IsConsidering && s.PromisedDate.HasValue)
+            {
+                return s.ShortName + "（検討中 " + s.PromisedDate.Value.ToString("M/d", CultureInfo.InvariantCulture) + "まで）";
+            }
+
+            return s.IsConsidering ? s.ShortName + "（検討中）" : s.ShortName;
         }
 
         public static HomeSummary Summarize(IEnumerable<HomeRow> rows)
@@ -145,7 +236,23 @@ namespace AnkenDesk.Core
             }
             else if (filter == HomeFilter.Answered)
             {
-                result = result.Where(r => r.IsAnswered);
+                result = result.Where(r => r.IsAnswered && !AnkenStatus.IsClosed(r.Anken.Status));
+            }
+            else if (filter == HomeFilter.DueThisWeek)
+            {
+                result = result.Where(r => r.NeedsAction && r.DaysToDue <= 7);
+            }
+            else if (filter == HomeFilter.Closed)
+            {
+                result = result.Where(r => AnkenStatus.IsClosed(r.Anken.Status));
+            }
+            else if (filter == HomeFilter.QuoteExpiring)
+            {
+                result = result.Where(r => r.QuoteAlerts.Count > 0);
+            }
+            else
+            {
+                // すべて
             }
 
             return result.Where(r => Matches(r, query)).ToList();
@@ -171,6 +278,47 @@ namespace AnkenDesk.Core
             fields.AddRange(row.SupplierNames);
 
             return tokens.All(t => fields.Any(f => f.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        /// <summary>
+        /// 催促が要る案件: 見積依頼を送ったのに未回答の調達先があり、回答期限が明日以前（期限超過も含む）。
+        /// 期限の近い順。
+        /// </summary>
+        public static IReadOnlyList<HomeRow> RemindCandidates(IEnumerable<HomeRow> rows)
+        {
+            return rows.Where(r => r.NeedsAction && r.CanRemind && r.DaysToDue <= 1)
+                .OrderBy(r => r.Anken.ReplyDueDate).ThenBy(r => r.Anken.Id).ToList();
+        }
+
+        /// <summary>状態の頭につける記号。色だけに頼らず、文字でも区別できるようにする（CLAUDE.md）。</summary>
+        public static string StatusMark(HomeRow r)
+        {
+            if (AnkenStatus.IsClosed(r.Anken.Status))
+            {
+                return "－ ";
+            }
+
+            if (r.AllDeclined)
+            {
+                return "× ";
+            }
+
+            if (r.IsAnswered)
+            {
+                return "○ ";
+            }
+
+            if (!r.NeedsAction)
+            {
+                return "・ ";
+            }
+
+            if (r.DaysToDue < 0)
+            {
+                return "▲ ";
+            }
+
+            return r.DaysToDue <= 1 ? "△ " : "□ ";
         }
 
         /// <summary>一覧に出す案件名: 「YYYYMMDD　品番」（備考があれば続けて）。</summary>

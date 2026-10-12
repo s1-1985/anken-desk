@@ -8,6 +8,7 @@ namespace AnkenDesk.Core.Tests
     /// <summary>テスト用の偽のOutlook。送ったメールを覚えておき、指定した結果を返す。</summary>
     internal sealed class FakeMailGateway : IMailGateway
     {
+        public bool NoConversationId;
         public readonly List<MailRequest> Sent = new List<MailRequest>();
         public readonly List<MailRequest> Drafts = new List<MailRequest>();
         public bool Offline;
@@ -50,6 +51,7 @@ namespace AnkenDesk.Core.Tests
                 Outcome = outcome,
                 Message = outcome.ToString(),
                 EntryId = outcome == MailOutcome.Sent ? "ENTRY" + n : null,
+                ConversationId = outcome == MailOutcome.Sent && !NoConversationId ? "CONV" + n : null,
                 SentAt = outcome == MailOutcome.Sent ? new DateTime(2026, 10, 5, 14, 12, 3) : (DateTime?)null,
                 MsgSaved = saved,
             };

@@ -1,4 +1,7 @@
+using System;
+using System.Linq;
 using System.Drawing;
+using AnkenDesk.Core;
 using System.IO;
 using System.Windows.Forms;
 
@@ -9,13 +12,18 @@ namespace AnkenDesk.App
     {
         private readonly AppServices _services;
         private readonly TextBox _path;
+        private readonly TextBox _cc;
+        private readonly CheckBox _category;
+        private readonly TextBox _company;
+        private readonly TextBox _person;
+        private readonly TextBox _contact;
 
         public SettingsForm(AppServices services)
         {
             _services = services;
             UiStyle.Apply(this);
-            Text = "設定（Work spaceの場所）";
-            ClientSize = new Size(720, 300);
+            Text = "設定・DBの控え";
+            ClientSize = new Size(720, 700);
 
             var help = new Label
             {
@@ -35,14 +43,97 @@ namespace AnkenDesk.App
             reset.Click += (s, e) => _path.Text = AppServices.DefaultWorkspaceRoot();
 
             var save = UiStyle.CreateButton("保存", true, 140);
-            save.Left = 424; save.Top = 236;
+            save.Left = 424; save.Top = 356;
             save.Click += (s, e) => Save();
 
             var cancel = UiStyle.CreateButton("キャンセル", false, 140);
-            cancel.Left = 570; cancel.Top = 236;
+            cancel.Left = 570; cancel.Top = 356;
             cancel.Click += (s, e) => DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[] { help, _path, browse, reset, save, cancel });
+            var backupHelp = new Label
+            {
+                Text = "DBの控え: 起動のたびに、1日1つ、最新14個を自動で残しています。\r\n間違えて消したり、おかしくなったときは、控えから戻せます（戻す前の状態も残ります）。",
+                Left = 16, Top = 224, Width = 688, Height = 54,
+            };
+            var restore = UiStyle.CreateButton("DBの控えから戻す...", false, 260);
+            restore.Left = 16; restore.Top = 284;
+            restore.Click += (s, e) => RestoreFromBackup();
+            var openBackup = UiStyle.CreateButton("控えのフォルダを開く", false, 240);
+            openBackup.Left = 286; openBackup.Top = 284;
+            openBackup.Click += (s, e) =>
+            {
+                var dir = Path.Combine(AppServices.DataDir(), "backup");
+                Directory.CreateDirectory(dir);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + dir + "\"") { UseShellExecute = true });
+            };
+
+            // Outlook・見積書の設定
+            var y = 340;
+            _cc = new TextBox { Left = 16, Top = y + 28, Width = 688, Text = services.DefaultCc };
+            _category = new CheckBox
+            {
+                Left = 16, Top = y + 70, Width = 688, Height = 30, Checked = services.MarkCategory,
+                Text = "取り込んだメールに、Outlookのカテゴリ「" + InboundImporter.CategoryName + "」を付ける",
+            };
+            _company = new TextBox { Left = 16, Top = y + 134, Width = 340, Text = services.CompanyName };
+            _person = new TextBox { Left = 364, Top = y + 134, Width = 340, Text = services.PersonName };
+            _contact = new TextBox { Left = 16, Top = y + 196, Width = 688, Text = services.Contact };
+            Controls.AddRange(new Control[]
+            {
+                new Label { Text = "見積依頼メールのCC（既定。空なら付けません。複数は「;」で区切る）", Left = 16, Top = y, Width = 688, Height = 24 },
+                _cc, _category,
+                new Label { Text = "客先見積書に載せる自社名", Left = 16, Top = y + 108, Width = 340, Height = 24 },
+                new Label { Text = "担当者名", Left = 364, Top = y + 108, Width = 340, Height = 24 },
+                _company, _person,
+                new Label { Text = "連絡先（電話・メールなど）", Left = 16, Top = y + 170, Width = 688, Height = 24 },
+                _contact,
+            });
+            save.Top = 640; cancel.Top = 640;
+
+            Controls.AddRange(new Control[] { help, _path, browse, reset, backupHelp, restore, openBackup, save, cancel });
+        }
+
+        // 控えを選んで、復元を予約する。入れ替えは、次にアプリを開いたとき（DBを開く前）に行う。
+        private void RestoreFromBackup()
+        {
+            var backups = DbBackup.List(Path.Combine(AppServices.DataDir(), "backup"));
+            if (backups.Count == 0)
+            {
+                MessageBox.Show(this, "DBの控えがまだありません。", "DBの控えから戻す", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var lines = backups.Select(b => b.At.ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + "　の控え　（" + (b.Size / 1024) + " KB）").ToList();
+            using (var dlg = new PickListForm("DBの控えから戻す", "戻す控えを選んでください。\r\nそれ以降に入力した内容は、戻したあとは無くなります（戻す前のDBも、控えのフォルダに残します）。", lines, "この控えに戻す"))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                var chosen = backups[dlg.SelectedIndexResult];
+                var ok = MessageBox.Show(this,
+                    chosen.At.ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + " の控えに戻します。\r\n\r\nアプリを再起動して入れ替えます。よろしいですか？",
+                    "DBの控えから戻す", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (ok != DialogResult.Yes)
+                {
+                    return;
+                }
+
+                try
+                {
+                    DbBackup.RequestRestore(chosen.Path, _services.Db.Path);
+                }
+                catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is UnauthorizedAccessException)
+                {
+                    MessageBox.Show(this, "戻せませんでした。\r\n\r\n" + ex.Message, "DBの控えから戻す", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            _services.Db.Dispose(); // DBのファイルを掴んだままにしない（入れ替えのため）
+            Application.Restart(); // 起動時に、予約された控えと入れ替わる
+            Environment.Exit(0);
         }
 
         private void Browse()
@@ -88,6 +179,17 @@ namespace AnkenDesk.App
                 }
             }
 
+            if (_cc.Text.Trim().Length > 0 && !MailSender.IsValidAddressList(_cc.Text))
+            {
+                MessageBox.Show(this, "CCのメールアドレスが不正です（複数のときは「;」で区切ります）。", "設定", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            _services.DefaultCc = _cc.Text;
+            _services.MarkCategory = _category.Checked;
+            _services.CompanyName = _company.Text;
+            _services.PersonName = _person.Text;
+            _services.Contact = _contact.Text;
             _services.WorkspaceRoot = path;
             DialogResult = DialogResult.OK;
         }

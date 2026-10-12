@@ -19,6 +19,21 @@ namespace AnkenDesk.App
             form.BackColor = Background;
             form.ForeColor = Text;
             form.StartPosition = FormStartPosition.CenterParent;
+
+            // 画面より大きいとき（小さいモニター・ノートPC）は、画面に収めて、スクロールで全部の操作ができるようにする。
+            // 収まるときは、何も変えない（今の見た目のまま）。
+            form.Load += (s, e) =>
+            {
+                var wa = Screen.FromControl(form).WorkingArea;
+                if (form.Width <= wa.Width && form.Height <= wa.Height)
+                {
+                    return;
+                }
+
+                form.AutoScroll = true;
+                form.Size = new Size(System.Math.Min(form.Width, wa.Width), System.Math.Min(form.Height, wa.Height));
+                form.Location = new Point(wa.Left + (wa.Width - form.Width) / 2, wa.Top + (wa.Height - form.Height) / 2);
+            };
         }
 
         public static Button CreateButton(string text, bool primary, int width)

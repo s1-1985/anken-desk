@@ -49,6 +49,76 @@ namespace AnkenDesk.Core
 
         /// <summary>Work spaceからの相対パス（得意先・種別のフォルダ名\案件フォルダ名）。</summary>
         public string FolderPath { get; set; } = "";
+
+        /// <summary>案件の進み具合（<see cref="AnkenStatus"/>）。</summary>
+        public string Status { get; set; } = AnkenStatus.InProgress;
+
+        /// <summary>結果（受注・失注など）を入力した日。</summary>
+        public DateTime? ResultDate { get; set; }
+
+        /// <summary>結果のメモ（理由など）。</summary>
+        public string ResultNote { get; set; } = "";
+
+        /// <summary>採用された（発注先に決めた）調達先。</summary>
+        public long? AdoptedSupplierId { get; set; }
+
+        /// <summary>失注・保留の理由（<see cref="LossReasons"/> から選ぶ。受注のときは空）。</summary>
+        public string ResultReason { get; set; } = "";
+
+        /// <summary>Outlookの予定表に入れた回答期限の予定のEntryID（入れていなければnull）。</summary>
+        public string? CalendarEntryId { get; set; }
+    }
+
+    /// <summary>失注・保留の理由の選択肢。集計に使う（自由な文章は「結果のメモ」へ）。</summary>
+    public static class LossReasons
+    {
+        public static readonly string[] All = { "価格", "納期", "仕様・技術", "他社に決定", "客先の都合（中止・延期）", "連絡がなくなった", "その他" };
+    }
+
+    /// <summary>見積の内訳の1行（材料費・加工費など）。</summary>
+    public sealed class BreakdownLine
+    {
+        public string Item { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>数量パターンごとの、客先への提出単価と、その元にした調達先。</summary>
+    public sealed class ClientPrice
+    {
+        public long PatternId { get; set; }
+        public decimal? SellingPrice { get; set; }
+        public long? AdoptedSupplierId { get; set; }
+    }
+
+    /// <summary>案件のメモ（調達先に紐づけることもできる）。メールの内容を記録したものは Source が "mail"。</summary>
+    public sealed class AnkenNote
+    {
+        public long Id { get; set; }
+        public long AnkenId { get; set; }
+        public long? SupplierId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public string Text { get; set; } = "";
+        public string Source { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 案件の進み具合。現行ExcelのSTATUSの選択肢が未確認（HANDOFF §8 #3）なので、仮の5つ【仮置き】。
+    /// 受注・失注・保留は「終わった／止めた」案件で、ホームの「要対応」に出さない。
+    /// </summary>
+    public static class AnkenStatus
+    {
+        public const string InProgress = "見積中";
+        public const string Submitted = "客先提出済み";
+        public const string Won = "受注";
+        public const string Lost = "失注";
+        public const string OnHold = "保留";
+
+        public static readonly string[] All = { InProgress, Submitted, Won, Lost, OnHold };
+
+        public static bool IsClosed(string status)
+        {
+            return status == Won || status == Lost || status == OnHold;
+        }
     }
 
     /// <summary>調達先（マスター）。略称は見積書PDFのファイル名に使う。</summary>
@@ -59,6 +129,9 @@ namespace AnkenDesk.Core
         public string ShortName { get; set; } = "";
         public string Email { get; set; } = "";
         public string Address { get; set; } = "";
+
+        /// <summary>得意分野（工法・材質など。空白や読点で区切って複数）。調達先を選ぶときの検索に使う。</summary>
+        public string Specialty { get; set; } = "";
     }
 
     /// <summary>案件に対して見積を依頼した調達先と、その回答のうち調達先ごとに1つの項目。</summary>
@@ -76,10 +149,53 @@ namespace AnkenDesk.Core
         public string Relaxation { get; set; } = "";
         public string Note { get; set; } = "";
 
+        /// <summary>回答の状態（<see cref="ResponseStatus"/>）。回答受領日が入ると、「回答済み」が優先される。</summary>
+        public string ResponseStatus { get; set; } = Core.ResponseStatus.None;
+
+        /// <summary>「検討中」のとき、調達先が約束した回答予定日。</summary>
+        public DateTime? PromisedDate { get; set; }
+
+        /// <summary>「辞退」の理由（任意）。</summary>
+        public string DeclineReason { get; set; } = "";
+
+        /// <summary>この見積（回答）の有効期限。切れた見積の単価は、そのままは使えない。</summary>
+        public DateTime? ValidUntil { get; set; }
+
         public bool IsAnswered
         {
             get { return ReceivedAt.HasValue; }
         }
+
+        /// <summary>辞退した（回答済みでないとき）。回答待ちにも、催促にも数えない。</summary>
+        public bool IsDeclined
+        {
+            get { return !IsAnswered && ResponseStatus == Core.ResponseStatus.Declined; }
+        }
+
+        /// <summary>検討中で、回答予定日がある（回答済みでないとき）。</summary>
+        public bool IsConsidering
+        {
+            get { return !IsAnswered && ResponseStatus == Core.ResponseStatus.Considering; }
+        }
+
+        /// <summary>回答待ち（回答済みでも、辞退でもない）。</summary>
+        public bool IsPending
+        {
+            get { return !IsAnswered && !IsDeclined; }
+        }
+    }
+
+    /// <summary>調達先の回答の状態。回答済みは「回答受領日」で決まるので、ここには入れない。</summary>
+    public static class ResponseStatus
+    {
+        /// <summary>通常（未回答、または回答済み）。</summary>
+        public const string None = "";
+
+        /// <summary>検討中。調達先が「○日までに回答する」と言っている。</summary>
+        public const string Considering = "検討中";
+
+        /// <summary>辞退。見積を出さないと言われた。</summary>
+        public const string Declined = "辞退";
     }
 
     /// <summary>調達先の回答のうち、数量パターンごとの単価とリードタイム。</summary>

@@ -113,6 +113,16 @@ namespace AnkenDesk.OutlookAccess
                 result.SentAt = (DateTime)sent.SentOn;
                 try
                 {
+                    var conv = (string)sent.ConversationID;
+                    result.ConversationId = string.IsNullOrEmpty(conv) ? null : conv;
+                }
+                catch (COMException)
+                {
+                    result.ConversationId = null; // 会話IDが取れない環境。返信の結びつけは、品番・差出人の推定になる。
+                }
+
+                try
+                {
                     sent.SaveAs(msgPath, OlMsg);
                     result.MsgSaved = System.IO.File.Exists(msgPath);
                 }
@@ -177,6 +187,11 @@ namespace AnkenDesk.OutlookAccess
             try
             {
                 mail.To = request.ToAddress;
+                if (!string.IsNullOrWhiteSpace(request.CcAddress))
+                {
+                    mail.CC = request.CcAddress;
+                }
+
                 mail.Subject = request.Subject;
 
                 var body = request.Body.Replace("\r\n", "\n").Replace("\n", "\r\n");

@@ -39,7 +39,7 @@ namespace AnkenDesk.Core
         /// <summary>調達先ごとのメールを作る。件名・本文は雛形に差し込む。</summary>
         public static MailRequest BuildRequest(
             AnkenRecord anken, DateTime dueDate, Supplier supplier,
-            string subjectTemplate, string bodyTemplate, IEnumerable<string> attachments, bool includeSignature)
+            string subjectTemplate, string bodyTemplate, IEnumerable<string> attachments, bool includeSignature, string ccAddress = "")
         {
             var req = new MailRequest
             {
@@ -47,6 +47,7 @@ namespace AnkenDesk.Core
                 Subject = MailTemplates.Apply(subjectTemplate, supplier, anken, dueDate),
                 Body = MailTemplates.Apply(bodyTemplate, supplier, anken, dueDate),
                 IncludeSignature = includeSignature,
+                CcAddress = (ccAddress ?? "").Trim(),
             };
             req.Attachments.AddRange(attachments);
             return req;
@@ -95,6 +96,7 @@ namespace AnkenDesk.Core
                     Subject = request.Subject,
                     Status = StatusText(result.Outcome),
                     EntryId = result.EntryId,
+                    ConversationId = result.ConversationId,
                     SentAt = result.SentAt,
                     MsgPath = result.MsgSaved ? Path.Combine(anken.FolderPath, FolderNames.Subfolders[3], Path.GetFileName(msgPath)) : null,
                     CreatedAt = now,
@@ -135,6 +137,8 @@ namespace AnkenDesk.Core
                     return "催促";
                 case MailKind.Answer:
                     return "回答";
+                case MailKind.Client:
+                    return "客先";
                 default:
                     return "依頼";
             }

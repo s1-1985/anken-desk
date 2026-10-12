@@ -13,6 +13,9 @@ namespace AnkenDesk.Core
 
         /// <summary>調達先から届いた回答（受信メールの取り込み）。</summary>
         Answer,
+
+        /// <summary>客先とのやり取りのメール（依頼メール、問い合わせなど。受信・送信どちらも）。</summary>
+        Client,
     }
 
     /// <summary>送るメール1通。調達先ごとに別々のメールにする（調達先同士のアドレスを見せない。HANDOFF.md §3.4）。</summary>
@@ -20,6 +23,9 @@ namespace AnkenDesk.Core
     {
         /// <summary>宛先。複数のときは「;」で区切る。</summary>
         public string ToAddress { get; set; } = "";
+
+        /// <summary>CC（社内共有など）。複数のときは「;」で区切る。空なら付けない。</summary>
+        public string CcAddress { get; set; } = "";
         public string Subject { get; set; } = "";
 
         /// <summary>本文（テキスト）。</summary>
@@ -50,6 +56,12 @@ namespace AnkenDesk.Core
         /// <summary>送信済みのメールのEntryID（送信前後で変わるので、送信済みで探し直した値）。</summary>
         public string? EntryId { get; set; }
         public DateTime? SentAt { get; set; }
+
+        /// <summary>
+        /// Outlookの会話ID（ConversationID）。返信は、同じ会話IDになる。返信を、送った依頼メールの案件に結びつけるために記録する。
+        /// 取れなかったとき（Outlookや接続の種類によっては空）は null。
+        /// </summary>
+        public string? ConversationId { get; set; }
 
         /// <summary>送信したメールを.msgとして保存できたか。保存先のフルパスは、依頼したパスと同じ。</summary>
         public bool MsgSaved { get; set; }
@@ -89,5 +101,18 @@ namespace AnkenDesk.Core
         /// <summary>.msgのWork spaceからの相対パス。</summary>
         public string? MsgPath { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>Outlookの会話ID（返信を結びつける鍵）。</summary>
+        public string? ConversationId { get; set; }
+    }
+}
+
+namespace AnkenDesk.Core
+{
+    /// <summary>送った依頼・催促のメールと同じ会話に属するメールの、取り込み先。</summary>
+    public sealed class ConversationLink
+    {
+        public long AnkenId { get; set; }
+        public long SupplierId { get; set; }
     }
 }

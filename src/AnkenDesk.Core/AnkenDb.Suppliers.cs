@@ -16,7 +16,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT id, name, short_name, email, address FROM supplier ORDER BY name";
+                cmd.CommandText = "SELECT id, name, short_name, email, address, specialty FROM supplier ORDER BY name";
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read())
@@ -28,6 +28,7 @@ namespace AnkenDesk.Core
                             ShortName = r.GetString(2),
                             Email = r.GetString(3),
                             Address = r.GetString(4),
+                            Specialty = r.GetString(5),
                         });
                     }
                 }
@@ -129,7 +130,8 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.supplier_id, s.name, s.short_name, a.sent_at, a.received_at, a.extra_cost, a.relaxation, a.note "
+                cmd.CommandText = "SELECT a.supplier_id, s.name, s.short_name, a.sent_at, a.received_at, a.extra_cost, a.relaxation, a.note, "
+                    + "a.response_status, a.promised_date, a.decline_reason, a.valid_until "
                     + "FROM anken_supplier a JOIN supplier s ON s.id = a.supplier_id WHERE a.anken_id = $a ORDER BY s.name";
                 cmd.Parameters.AddWithValue("$a", ankenId);
                 using (var r = cmd.ExecuteReader())
@@ -147,6 +149,10 @@ namespace AnkenDesk.Core
                             ExtraCost = r.GetString(5),
                             Relaxation = r.GetString(6),
                             Note = r.GetString(7),
+                            ResponseStatus = r.GetString(8),
+                            PromisedDate = r.IsDBNull(9) ? (DateTime?)null : ParseDate(r.GetString(9)),
+                            DeclineReason = r.GetString(10),
+                            ValidUntil = r.IsDBNull(11) ? (DateTime?)null : ParseDate(r.GetString(11)),
                         });
                     }
                 }
@@ -162,7 +168,8 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.anken_id, a.supplier_id, s.name, s.short_name, a.sent_at, a.received_at, a.extra_cost, a.relaxation, a.note "
+                cmd.CommandText = "SELECT a.anken_id, a.supplier_id, s.name, s.short_name, a.sent_at, a.received_at, a.extra_cost, a.relaxation, a.note, "
+                    + "a.response_status, a.promised_date, a.decline_reason, a.valid_until "
                     + "FROM anken_supplier a JOIN supplier s ON s.id = a.supplier_id ORDER BY a.anken_id, s.name";
                 using (var r = cmd.ExecuteReader())
                 {
@@ -187,6 +194,10 @@ namespace AnkenDesk.Core
                             ExtraCost = r.GetString(6),
                             Relaxation = r.GetString(7),
                             Note = r.GetString(8),
+                            ResponseStatus = r.GetString(9),
+                            PromisedDate = r.IsDBNull(10) ? (DateTime?)null : ParseDate(r.GetString(10)),
+                            DeclineReason = r.GetString(11),
+                            ValidUntil = r.IsDBNull(12) ? (DateTime?)null : ParseDate(r.GetString(12)),
                         });
                     }
                 }
@@ -214,17 +225,80 @@ namespace AnkenDesk.Core
             }
         }
 
-        /// <summary>案件から調達先を外す。その調達先の単価・日付などの入力も消える。</summary>
+        /// <summary>
+        /// 案件から調達先を外す。その調達先の単価・日付などの入力も消えるが、その時点の内容を
+        /// 「外した調達先」の控えに残す（<see cref="RestoreRemovedSupplier"/> で戻せる）。回答の履歴（版）は戻らない。
+        /// </summary>
         public void RemoveSupplierFromAnken(long ankenId, long supplierId)
         {
             using (var conn = Open())
-            using (var cmd = conn.CreateCommand())
+            using (var tx = conn.BeginTransaction())
             {
-                cmd.CommandText = "DELETE FROM anken_supplier WHERE anken_id = $a AND supplier_id = $s";
-                cmd.Parameters.AddWithValue("$a", ankenId);
-                cmd.Parameters.AddWithValue("$s", supplierId);
-                cmd.ExecuteNonQuery();
+                var quotes = new List<string>();
+                using (var q = conn.CreateCommand())
+                {
+                    q.Transaction = tx;
+                    q.CommandText = "SELECT pattern_id, unit_price, lead_time_days FROM quote WHERE anken_id = $a AND supplier_id = $s";
+                    q.Parameters.AddWithValue("$a", ankenId);
+                    q.Parameters.AddWithValue("$s", supplierId);
+                    using (var r = q.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            quotes.Add(r.GetInt64(0) + "|" + (r.IsDBNull(1) ? "" : r.GetString(1)) + "|" + (r.IsDBNull(2) ? "" : r.GetInt32(2).ToString(CultureInfo.InvariantCulture)));
+                        }
+                    }
+                }
+
+                var breakdowns = new List<string>();
+                using (var b = conn.CreateCommand())
+                {
+                    b.Transaction = tx;
+                    b.CommandText = "SELECT pattern_id, item, amount FROM quote_breakdown WHERE anken_id = $a AND supplier_id = $s ORDER BY pattern_id, seq";
+                    b.Parameters.AddWithValue("$a", ankenId);
+                    b.Parameters.AddWithValue("$s", supplierId);
+                    using (var r = b.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            breakdowns.Add(r.GetInt64(0) + "|" + SnapshotText(r.GetString(1)) + "|" + r.GetString(2));
+                        }
+                    }
+                }
+
+                using (var snap = conn.CreateCommand())
+                {
+                    snap.Transaction = tx;
+                    snap.CommandText = "INSERT INTO removed_supplier (anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, breakdowns, removed_at, "
+                        + "response_status, promised_date, decline_reason, valid_until) "
+                        + "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, $quotes, $breakdowns, $now, "
+                        + "response_status, promised_date, decline_reason, valid_until "
+                        + "FROM anken_supplier WHERE anken_id = $a AND supplier_id = $s";
+                    snap.Parameters.AddWithValue("$quotes", string.Join(";", quotes));
+                    snap.Parameters.AddWithValue("$breakdowns", string.Join(";", breakdowns));
+                    snap.Parameters.AddWithValue("$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                    snap.Parameters.AddWithValue("$a", ankenId);
+                    snap.Parameters.AddWithValue("$s", supplierId);
+                    snap.ExecuteNonQuery();
+                }
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.Transaction = tx;
+                    cmd.CommandText = "DELETE FROM anken_supplier WHERE anken_id = $a AND supplier_id = $s";
+                    cmd.Parameters.AddWithValue("$a", ankenId);
+                    cmd.Parameters.AddWithValue("$s", supplierId);
+                    cmd.ExecuteNonQuery();
+                }
+
+                tx.Commit();
             }
+        }
+
+        // 控えの文字列の区切り（; |）が項目名に入っていても壊れないよう、全角に置き換える。
+        private static string SnapshotText(string text)
+        {
+            return (text ?? "").Replace(';', '；').Replace('|', '｜');
         }
 
         public IReadOnlyList<Quote> ListQuotes(long ankenId)
@@ -274,8 +348,9 @@ namespace AnkenDesk.Core
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = "UPDATE anken_supplier SET sent_at = $sent, received_at = $recv, extra_cost = $extra, relaxation = $relax, note = $note "
+                cmd.CommandText = "UPDATE anken_supplier SET sent_at = $sent, received_at = $recv, extra_cost = $extra, relaxation = $relax, note = $note, valid_until = $valid "
                     + "WHERE anken_id = $a AND supplier_id = $s";
+                cmd.Parameters.AddWithValue("$valid", DateOrNull(answer.ValidUntil));
                 cmd.Parameters.AddWithValue("$sent", DateOrNull(answer.SentAt));
                 cmd.Parameters.AddWithValue("$recv", DateOrNull(answer.ReceivedAt));
                 cmd.Parameters.AddWithValue("$extra", answer.ExtraCost.Trim());

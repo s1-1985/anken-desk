@@ -46,7 +46,10 @@ namespace AnkenDesk.App
         private readonly TextBox _body = new TextBox();
         private readonly DateTimePicker _due = new DateTimePicker { Format = DateTimePickerFormat.Short };
         private readonly CheckBox _signature = new CheckBox();
+        private readonly TextBox _cc = new TextBox();
         private readonly TextBox _preview = new TextBox();
+        private readonly ComboBox _previewWho = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private bool _updatingWho;
         private readonly Label _problem = new Label();
         private readonly Button _send;
         private readonly Button _draft;
@@ -148,7 +151,7 @@ namespace AnkenDesk.App
             _subject.SetBounds(12, 66, 416, 32);
             p.Controls.Add(_subject);
             p.Controls.Add(new Label { Text = "本文", Left = 12, Top = 106, Width = 200, Height = 22 });
-            _body.SetBounds(12, 130, 416, h - 190 - 130 - 200);
+            _body.SetBounds(12, 130, 416, h - 190 - 130 - 244);
             _body.Multiline = true;
             _body.AcceptsReturn = true;
             _body.ScrollBars = ScrollBars.Vertical;
@@ -156,6 +159,14 @@ namespace AnkenDesk.App
             p.Controls.Add(_body);
 
             var y = h - 190 - 190;
+            var ccLabel = new Label { Text = "CC", Left = 12, Top = y - 42, Width = 40, Height = 24 };
+            ccLabel.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            _cc.SetBounds(56, y - 46, 372, 32);
+            _cc.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            _cc.Text = _services.DefaultCc;
+            _cc.TextChanged += (s, e) => UpdatePreview();
+            p.Controls.Add(ccLabel);
+            p.Controls.Add(_cc);
             var help = new Label
             {
                 Text = "差し込み: " + string.Join(" ", MailTemplates.Placeholders) + "（調達先ごとに入れ替わります）",
@@ -194,8 +205,16 @@ namespace AnkenDesk.App
             var p = new Panel { Left = 880, Top = 60, Width = 344, Height = h - 190, BackColor = Color.White };
             p.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             p.Controls.Add(Head("送るメールの見え方", 12, 8));
-            p.Controls.Add(new Label { Text = "（選んだ先頭の調達先の場合）", Left = 12, Top = 38, Width = 320, Height = 24 });
-            _preview.SetBounds(12, 66, 320, h - 190 - 78);
+            _previewWho.SetBounds(12, 38, 320, 28);
+            _previewWho.SelectedIndexChanged += (s, e) =>
+            {
+                if (!_updatingWho)
+                {
+                    UpdatePreview();
+                }
+            };
+            p.Controls.Add(_previewWho);
+            _preview.SetBounds(12, 74, 320, h - 190 - 86);
             _preview.Multiline = true;
             _preview.ReadOnly = true;
             _preview.ScrollBars = ScrollBars.Vertical;
@@ -287,13 +306,31 @@ namespace AnkenDesk.App
         private void UpdatePreview()
         {
             var selected = Selected();
+
+            // 見え方を見る調達先を選べるようにする（選んだ調達先が変わったときだけ、一覧を作り直す）。
+            var names = selected.Select(x => x.Master.Name).ToList();
+            if (!names.SequenceEqual(_previewWho.Items.Cast<string>()))
+            {
+                _updatingWho = true;
+                var keep = _previewWho.SelectedItem as string;
+                _previewWho.Items.Clear();
+                foreach (var n in names)
+                {
+                    _previewWho.Items.Add(n);
+                }
+
+                var at = keep == null ? -1 : names.IndexOf(keep);
+                _previewWho.SelectedIndex = names.Count == 0 ? -1 : Math.Max(0, at);
+                _updatingWho = false;
+            }
+
             if (selected.Count == 0)
             {
                 _preview.Text = "";
             }
             else
             {
-                var first = selected[0].Master;
+                var first = selected[Math.Max(0, _previewWho.SelectedIndex)].Master;
                 var sb = new StringBuilder();
                 sb.AppendLine("宛先: " + first.Email);
                 sb.AppendLine("件名: " + MailTemplates.Apply(_subject.Text, first, _anken, _due.Value.Date));
@@ -312,6 +349,11 @@ namespace AnkenDesk.App
             if (bad.Count > 0)
             {
                 problems.Add("メールアドレスが未登録・不正な調達先があります: " + string.Join("、", bad) + "（調達先マスターで直してください）");
+            }
+
+            if (_cc.Text.Trim().Length > 0 && !MailSender.IsValidAddressList(_cc.Text))
+            {
+                problems.Add("CCのメールアドレスが不正です（複数のときは「;」で区切ります）。");
             }
 
             _problem.Text = problems.Count == 0 ? "" : "警告: " + string.Join("　", problems);
@@ -367,6 +409,11 @@ namespace AnkenDesk.App
             confirm.AppendLine();
             confirm.AppendLine("件名: " + MailTemplates.Apply(_subject.Text, selected[0].Master, _anken, _due.Value.Date));
             confirm.AppendLine("添付: " + (attachNames.Count == 0 ? "なし" : string.Join("、", attachNames)));
+            if (_cc.Text.Trim().Length > 0)
+            {
+                confirm.AppendLine("CC: " + _cc.Text.Trim());
+            }
+
             confirm.AppendLine("署名: " + (_signature.Checked ? "入れる" : "入れない"));
             var ok = MessageBox.Show(this, confirm.ToString(), send ? "送信の確認" : "下書きの確認",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
@@ -398,7 +445,7 @@ namespace AnkenDesk.App
 
             var items = selected
                 .Select(s => new KeyValuePair<Supplier, MailRequest>(s.Master,
-                    MailSender.BuildRequest(_anken, _due.Value.Date, s.Master, _subject.Text, _body.Text, attachments, _signature.Checked)))
+                    MailSender.BuildRequest(_anken, _due.Value.Date, s.Master, _subject.Text, _body.Text, attachments, _signature.Checked, _cc.Text)))
                 .ToList();
 
             try
