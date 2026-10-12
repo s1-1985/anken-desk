@@ -20,6 +20,47 @@ namespace AnkenDesk.Core
         /// <summary>回答した（回答受領日がある）案件の数。</summary>
         public int Answered { get; set; }
 
+        /// <summary>辞退された案件の数。</summary>
+        public int Declined { get; set; }
+
+        /// <summary>辞退率（辞退 ÷ 依頼）。依頼が無ければnull。</summary>
+        public double? DeclineRate
+        {
+            get { return Requested == 0 ? (double?)null : (double)Declined / Requested; }
+        }
+
+        /// <summary>1行の実績の文字（調達先を選ぶ画面に出す）。例: 「回答80%・平均3.2日・最安2回・辞退1」。実績が無ければ空。</summary>
+        public string Summary()
+        {
+            if (Ankens == 0)
+            {
+                return "";
+            }
+
+            var parts = new List<string>();
+            if (AnswerRate.HasValue)
+            {
+                parts.Add("回答" + (AnswerRate.Value * 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "%");
+            }
+
+            if (AverageReplyDays.HasValue)
+            {
+                parts.Add("平均" + AverageReplyDays.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "日");
+            }
+
+            if (CheapestAnkens > 0)
+            {
+                parts.Add("最安" + CheapestAnkens + "回");
+            }
+
+            if (Declined > 0)
+            {
+                parts.Add("辞退" + Declined);
+            }
+
+            return parts.Count == 0 ? "依頼" + Ankens + "件" : string.Join("・", parts);
+        }
+
         /// <summary>依頼送付日から回答受領日までの平均日数。両方の日付がある案件だけで数える。無ければnull。</summary>
         public double? AverageReplyDays { get; set; }
 
@@ -67,6 +108,11 @@ namespace AnkenDesk.Core
                     if (s.IsAnswered)
                     {
                         st.Answered++;
+                    }
+
+                    if (s.IsDeclined)
+                    {
+                        st.Declined++;
                     }
 
                     if (s.SentAt.HasValue && s.ReceivedAt.HasValue)

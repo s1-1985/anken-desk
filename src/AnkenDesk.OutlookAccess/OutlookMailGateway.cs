@@ -187,6 +187,11 @@ namespace AnkenDesk.OutlookAccess
             try
             {
                 mail.To = request.ToAddress;
+                if (!string.IsNullOrWhiteSpace(request.CcAddress))
+                {
+                    mail.CC = request.CcAddress;
+                }
+
                 mail.Subject = request.Subject;
 
                 var body = request.Body.Replace("\r\n", "\n").Replace("\n", "\r\n");

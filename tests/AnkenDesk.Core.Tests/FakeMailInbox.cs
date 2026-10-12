@@ -48,6 +48,14 @@ namespace AnkenDesk.Core.Tests
             return Selected.GetRange(0, Math.Min(maxCount, Selected.Count));
         }
 
+        public readonly List<string> Categorized = new List<string>();
+
+        public bool AddCategory(string entryId, string category)
+        {
+            Categorized.Add(entryId + "|" + category);
+            return true;
+        }
+
         public string? GetConversationId(string entryId)
         {
             string c;

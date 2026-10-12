@@ -62,8 +62,17 @@ namespace AnkenDesk.Core
         /// <summary>採用された（発注先に決めた）調達先。</summary>
         public long? AdoptedSupplierId { get; set; }
 
+        /// <summary>失注・保留の理由（<see cref="LossReasons"/> から選ぶ。受注のときは空）。</summary>
+        public string ResultReason { get; set; } = "";
+
         /// <summary>Outlookの予定表に入れた回答期限の予定のEntryID（入れていなければnull）。</summary>
         public string? CalendarEntryId { get; set; }
+    }
+
+    /// <summary>失注・保留の理由の選択肢。集計に使う（自由な文章は「結果のメモ」へ）。</summary>
+    public static class LossReasons
+    {
+        public static readonly string[] All = { "価格", "納期", "仕様・技術", "他社に決定", "客先の都合（中止・延期）", "連絡がなくなった", "その他" };
     }
 
     /// <summary>見積の内訳の1行（材料費・加工費など）。</summary>
@@ -140,10 +149,53 @@ namespace AnkenDesk.Core
         public string Relaxation { get; set; } = "";
         public string Note { get; set; } = "";
 
+        /// <summary>回答の状態（<see cref="ResponseStatus"/>）。回答受領日が入ると、「回答済み」が優先される。</summary>
+        public string ResponseStatus { get; set; } = Core.ResponseStatus.None;
+
+        /// <summary>「検討中」のとき、調達先が約束した回答予定日。</summary>
+        public DateTime? PromisedDate { get; set; }
+
+        /// <summary>「辞退」の理由（任意）。</summary>
+        public string DeclineReason { get; set; } = "";
+
+        /// <summary>この見積（回答）の有効期限。切れた見積の単価は、そのままは使えない。</summary>
+        public DateTime? ValidUntil { get; set; }
+
         public bool IsAnswered
         {
             get { return ReceivedAt.HasValue; }
         }
+
+        /// <summary>辞退した（回答済みでないとき）。回答待ちにも、催促にも数えない。</summary>
+        public bool IsDeclined
+        {
+            get { return !IsAnswered && ResponseStatus == Core.ResponseStatus.Declined; }
+        }
+
+        /// <summary>検討中で、回答予定日がある（回答済みでないとき）。</summary>
+        public bool IsConsidering
+        {
+            get { return !IsAnswered && ResponseStatus == Core.ResponseStatus.Considering; }
+        }
+
+        /// <summary>回答待ち（回答済みでも、辞退でもない）。</summary>
+        public bool IsPending
+        {
+            get { return !IsAnswered && !IsDeclined; }
+        }
+    }
+
+    /// <summary>調達先の回答の状態。回答済みは「回答受領日」で決まるので、ここには入れない。</summary>
+    public static class ResponseStatus
+    {
+        /// <summary>通常（未回答、または回答済み）。</summary>
+        public const string None = "";
+
+        /// <summary>検討中。調達先が「○日までに回答する」と言っている。</summary>
+        public const string Considering = "検討中";
+
+        /// <summary>辞退。見積を出さないと言われた。</summary>
+        public const string Declined = "辞退";
     }
 
     /// <summary>調達先の回答のうち、数量パターンごとの単価とリードタイム。</summary>

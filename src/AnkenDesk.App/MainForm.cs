@@ -30,6 +30,12 @@ namespace AnkenDesk.App
         private readonly Button _tabWeek = new Button();
         private readonly Button _tabClosed = new Button();
         private Button? _navRemind;
+        private Button? _navHome;
+        private Button? _navList;
+        private readonly Panel _body = new Panel { Dock = DockStyle.Fill };
+        private Control? _homeView;
+        private AnkenListView? _listView;
+        private readonly List<Button> _viewNavs = new List<Button>();
         private readonly HoverPreview _hover = new HoverPreview();
         private readonly System.Windows.Forms.Timer _hoverTimer = new System.Windows.Forms.Timer { Interval = 600 };
         private int _hoverRow = -1;
@@ -50,7 +56,10 @@ namespace AnkenDesk.App
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 640);
 
-            Controls.Add(BuildMain());
+            // 右の本体は、「ホーム」と「案件一覧」を、タブのように切り替えて表示する。
+            _homeView = BuildMain();
+            _body.Controls.Add(_homeView);
+            Controls.Add(_body);
             Controls.Add(BuildNav());
 
             KeyPreview = true;
@@ -111,8 +120,53 @@ namespace AnkenDesk.App
             };
 
             _search.TextChanged += (s, e) => Reload();
-            Activated += (s, e) => Reload();
+            Activated += (s, e) =>
+            {
+                Reload();
+                if (_listView != null && _listView.Visible)
+                {
+                    _listView.Reload();
+                }
+            };
             Reload();
+        }
+
+        // ---- 本体の切り替え（ホーム／案件一覧） ----
+
+        private void ShowView(Control view, Button nav)
+        {
+            foreach (Control c in _body.Controls)
+            {
+                c.Visible = c == view;
+            }
+
+            foreach (var b in _viewNavs)
+            {
+                var selected = b == nav;
+                b.BackColor = selected ? NavSelected : Color.White;
+                b.Font = new Font("BIZ UDPGothic", 11F, selected ? FontStyle.Bold : FontStyle.Regular);
+            }
+        }
+
+        private void ShowHomeView()
+        {
+            ShowView(_homeView!, _navHome!);
+            Reload();
+        }
+
+        private void ShowListView()
+        {
+            if (_listView == null)
+            {
+                _listView = new AnkenListView(_services);
+                _body.Controls.Add(_listView);
+            }
+            else
+            {
+                _listView.Reload();
+            }
+
+            ShowView(_listView, _navList!);
         }
 
         // ---- 左のメニュー ----
@@ -139,8 +193,8 @@ namespace AnkenDesk.App
             // Dockの積み順: あとから足したものが手前（上）に来るので、逆順に足す。
             var items = new List<Control>
             {
-                NavButton("ホーム（要対応）", true, null),
-                NavButton("案件一覧", false, () => new AnkenListForm(_services).ShowDialog(this)),
+                (_navHome = ViewNavButton("ホーム（要対応）", true, () => ShowHomeView())),
+                (_navList = ViewNavButton("案件一覧", false, () => ShowListView())),
                 NavButton("受信メールの自動仕分け", false, () => new TriageForm(_services).ShowDialog(this)),
                 NavButton("受信メールから取り込む", false, () => new ImportMailForm(_services, null).ShowDialog(this)),
                 NavButton("横断検索", false, () => new SearchForm(_services).ShowDialog(this)),
@@ -165,6 +219,15 @@ namespace AnkenDesk.App
             nav.Controls.Add(sub);
             nav.Controls.Add(brand);
             return nav;
+        }
+
+        // 本体の表示を切り替えるメニュー（別の窓は開かない）。選ばれている間は、色と太字で示す。
+        private Button ViewNavButton(string text, bool selected, Action show)
+        {
+            var b = NavButton(text, selected, null);
+            b.Click += (s, e) => show();
+            _viewNavs.Add(b);
+            return b;
         }
 
         private Button NavButton(string text, bool selected, Action? action)

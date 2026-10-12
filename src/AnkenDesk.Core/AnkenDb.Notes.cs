@@ -272,6 +272,12 @@ namespace AnkenDesk.Core
         /// <summary>結果を入力する。状態も同時に変える。採用した調達先は、受注のときだけ意味がある（それ以外はnullにする）。</summary>
         public void SetAnkenResult(long ankenId, string status, DateTime? resultDate, string note, long? adoptedSupplierId)
         {
+            SetAnkenResult(ankenId, status, resultDate, note, adoptedSupplierId, "");
+        }
+
+        /// <summary>結果を入力する（理由つき）。理由は、失注・保留のときだけ保存する（<see cref="LossReasons"/> の選択肢）。</summary>
+        public void SetAnkenResult(long ankenId, string status, DateTime? resultDate, string note, long? adoptedSupplierId, string reason)
+        {
             if (!AnkenStatus.All.Contains(status))
             {
                 throw new ArgumentException("知らない状態です: " + status);
@@ -280,7 +286,8 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "UPDATE anken SET status = $s, result_date = $d, result_note = $n, adopted_supplier_id = $sup WHERE id = $id";
+                cmd.CommandText = "UPDATE anken SET status = $s, result_date = $d, result_note = $n, adopted_supplier_id = $sup, result_reason = $reason WHERE id = $id";
+                cmd.Parameters.AddWithValue("$reason", status == AnkenStatus.Lost || status == AnkenStatus.OnHold ? (reason ?? "").Trim() : "");
                 cmd.Parameters.AddWithValue("$s", status);
                 cmd.Parameters.AddWithValue("$d", resultDate.HasValue ? (object)resultDate.Value.ToString(DateFormat, CultureInfo.InvariantCulture) : DBNull.Value);
                 cmd.Parameters.AddWithValue("$n", (note ?? "").Trim());

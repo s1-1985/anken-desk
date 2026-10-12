@@ -50,6 +50,12 @@ namespace AnkenDesk.Core
         /// </summary>
         IReadOnlyList<InboundMail> GetSelected(int maxCount);
 
+        /// <summary>
+        /// メールに、Outlookのカテゴリ（色の分類）を足す。すでに付いていれば何もしない。メールは動かさない（分類の追加だけ）。
+        /// 付けられなかったときは false。
+        /// </summary>
+        bool AddCategory(string entryId, string category);
+
         /// <summary>メールの会話ID。メールが見つからない・取れないときは null。</summary>
         string? GetConversationId(string entryId);
 
@@ -86,6 +92,9 @@ namespace AnkenDesk.Core
         /// 保存できたものがあれば、記録（mail_log）に残し、markReceivedDate が指定されていれば「回答受領日」を入れる。
         /// 1つの保存の失敗で、ほかを止めない（失敗は Errors に入れる）。
         /// </summary>
+        /// <summary>取り込んだメールに付ける、Outlookのカテゴリの名前。</summary>
+        public const string CategoryName = "案件デスク";
+
         /// <summary>メモに残す本文の最大の長さ。全文は .msg に残る。</summary>
         public const int NoteBodyMaxChars = 4000;
 

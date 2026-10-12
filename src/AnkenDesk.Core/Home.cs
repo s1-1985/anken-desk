@@ -19,6 +19,9 @@ namespace AnkenDesk.Core
 
         /// <summary>終了・保留: 受注・失注・保留にした案件。</summary>
         Closed,
+
+        /// <summary>見積の期限: 回答済みの見積に、有効期限が切れた・7日以内に切れるものがある案件（終わった案件を除く）。</summary>
+        QuoteExpiring,
     }
 
     /// <summary>ホームの一覧の1行（1案件）。</summary>
@@ -27,6 +30,21 @@ namespace AnkenDesk.Core
         public AnkenRecord Anken { get; set; } = new AnkenRecord();
         public int Answered { get; set; }
         public int Total { get; set; }
+
+        /// <summary>辞退した調達先の数（回答待ちにも、催促にも数えない）。</summary>
+        public int Declined { get; set; }
+
+        /// <summary>回答待ちの調達先の数（回答済みでも、辞退でもない）。</summary>
+        public int Pending
+        {
+            get { return Math.Max(0, Total - Answered - Declined); }
+        }
+
+        /// <summary>未回答の調達先の、表示用の文字（「乙（検討中 10/15まで）」など）。無ければ <see cref="PendingNames"/>。</summary>
+        public IReadOnlyList<string> PendingDetail { get; set; } = new List<string>();
+
+        /// <summary>見積の有効期限の注意（「甲: 10/20まで（あと3日）」「乙: 有効期限切れ（5日前）」）。</summary>
+        public IReadOnlyList<string> QuoteAlerts { get; set; } = new List<string>();
 
         /// <summary>回答期限までの日数。期限を過ぎていれば負の数。</summary>
         public int DaysToDue { get; set; }
@@ -48,12 +66,42 @@ namespace AnkenDesk.Core
 
         public bool NeedsAction
         {
-            get { return !AnkenStatus.IsClosed(Anken.Status) && Total > 0 && Answered < Total; }
+            get { return !AnkenStatus.IsClosed(Anken.Status) && Total > 0 && Pending > 0; }
         }
 
+        /// <summary>回答待ちが無く、1社以上が回答済み（残りは辞退）。</summary>
         public bool IsAnswered
         {
-            get { return Total > 0 && Answered == Total; }
+            get { return Total > 0 && Pending == 0 && Answered > 0; }
+        }
+
+        /// <summary>全社が辞退した。</summary>
+        public bool AllDeclined
+        {
+            get { return Total > 0 && Pending == 0 && Answered == 0 && Declined > 0; }
+        }
+
+        /// <summary>回答状況の文字（例: 「1/3社（辞退1）」。未回答があれば「未回答: 乙」を続ける）。</summary>
+        public string ProgressText(bool multiline = true)
+        {
+            if (Total == 0)
+            {
+                return "調達先が未登録です";
+            }
+
+            var text = Answered + "/" + Total + "社" + (Declined > 0 ? "（辞退" + Declined + "）" : "");
+            var pending = PendingDetail.Count > 0 ? PendingDetail : PendingNames;
+            if (pending.Count > 0)
+            {
+                text += (multiline ? "\r\n" : "　") + "未回答: " + string.Join("、", pending);
+            }
+
+            if (QuoteAlerts.Count > 0)
+            {
+                text += (multiline ? "\r\n" : "　") + "見積の期限: " + string.Join("、", QuoteAlerts);
+            }
+
+            return text;
         }
 
         /// <summary>状態を文字で返す（色だけに頼らない）。</summary>
@@ -69,6 +117,11 @@ namespace AnkenDesk.Core
                 if (Total == 0)
                 {
                     return "依頼先なし";
+                }
+
+                if (AllDeclined)
+                {
+                    return "全社辞退";
                 }
 
                 if (IsAnswered)
@@ -113,14 +166,20 @@ namespace AnkenDesk.Core
                     list = new List<AnkenSupplier>();
                 }
 
+                var closed = AnkenStatus.IsClosed(a.Status);
                 rows.Add(new HomeRow
                 {
                     Anken = a,
                     Total = list.Count,
                     Answered = list.Count(s => s.IsAnswered),
+                    Declined = list.Count(s => s.IsDeclined),
                     DaysToDue = (a.ReplyDueDate.Date - today.Date).Days,
-                    PendingNames = list.Where(s => !s.IsAnswered).Select(s => s.ShortName).ToList(),
-                    RemindSupplierIds = list.Where(s => !s.IsAnswered && s.SentAt != null).Select(s => s.SupplierId).ToList(),
+                    PendingNames = list.Where(s => s.IsPending).Select(s => s.ShortName).ToList(),
+                    PendingDetail = list.Where(s => s.IsPending).Select(s => PendingText(s)).ToList(),
+                    // 催促の相手: 依頼を送った、回答待ち（辞退は除く）。検討中で回答予定日がまだ先なら、待つ。
+                    RemindSupplierIds = list.Where(s => s.IsPending && s.SentAt != null && !(s.IsConsidering && s.PromisedDate.HasValue && s.PromisedDate.Value.Date >= today.Date))
+                        .Select(s => s.SupplierId).ToList(),
+                    QuoteAlerts = closed ? new List<string>() : QuoteValidity.Alerts(list, today).Select(x => x.Text).ToList(),
                     SupplierNames = list.SelectMany(s => new[] { s.SupplierName, s.ShortName }).Distinct().ToList(),
                 });
             }
@@ -131,6 +190,17 @@ namespace AnkenDesk.Core
                 .ThenByDescending(r => r.Anken.RequestDate)
                 .ThenByDescending(r => r.Anken.Id)
                 .ToList();
+        }
+
+        // 回答待ちの調達先の表示: 検討中なら、回答予定日を添える。
+        private static string PendingText(AnkenSupplier s)
+        {
+            if (s.IsConsidering && s.PromisedDate.HasValue)
+            {
+                return s.ShortName + "（検討中 " + s.PromisedDate.Value.ToString("M/d", CultureInfo.InvariantCulture) + "まで）";
+            }
+
+            return s.IsConsidering ? s.ShortName + "（検討中）" : s.ShortName;
         }
 
         public static HomeSummary Summarize(IEnumerable<HomeRow> rows)
@@ -175,6 +245,10 @@ namespace AnkenDesk.Core
             else if (filter == HomeFilter.Closed)
             {
                 result = result.Where(r => AnkenStatus.IsClosed(r.Anken.Status));
+            }
+            else if (filter == HomeFilter.QuoteExpiring)
+            {
+                result = result.Where(r => r.QuoteAlerts.Count > 0);
             }
             else
             {
@@ -222,6 +296,11 @@ namespace AnkenDesk.Core
             if (AnkenStatus.IsClosed(r.Anken.Status))
             {
                 return "－ ";
+            }
+
+            if (r.AllDeclined)
+            {
+                return "× ";
             }
 
             if (r.IsAnswered)

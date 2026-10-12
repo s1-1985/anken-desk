@@ -9,7 +9,7 @@ namespace AnkenDesk.Core
     /// <summary>SQLiteの業務データ。接続は操作ごとに開閉する（接続プールは破棄時に空にする）。</summary>
     public sealed partial class AnkenDb : IDisposable
     {
-        private const int SchemaVersion = 8;
+        private const int SchemaVersion = 9;
         private const string DateFormat = "yyyy-MM-dd";
 
         private readonly string _connectionString;
@@ -257,7 +257,7 @@ namespace AnkenDesk.Core
             using (var conn = Open())
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status, a.result_date, a.result_note, a.adopted_supplier_id, a.calendar_entry_id "
+                cmd.CommandText = "SELECT a.id, a.client_id, c.name, a.request_date, a.part_number, a.part_name, a.note, a.reply_due_date, a.folder_path, a.status, a.result_date, a.result_note, a.adopted_supplier_id, a.calendar_entry_id, a.result_reason "
                     + "FROM anken a JOIN client c ON c.id = a.client_id ORDER BY a.request_date DESC, a.id DESC";
                 using (var r = cmd.ExecuteReader())
                 {
@@ -279,6 +279,7 @@ namespace AnkenDesk.Core
                             ResultNote = r.GetString(11),
                             AdoptedSupplierId = r.IsDBNull(12) ? (long?)null : r.GetInt64(12),
                             CalendarEntryId = r.IsDBNull(13) ? null : r.GetString(13),
+                            ResultReason = r.GetString(14),
                         });
                     }
                 }
@@ -504,6 +505,25 @@ namespace AnkenDesk.Core
                         Exec(conn, tx, "ALTER TABLE mail_log ADD COLUMN conversation_id TEXT");
                         Exec(conn, tx, "CREATE INDEX idx_mail_log_conversation ON mail_log (conversation_id)");
                         Exec(conn, tx, "PRAGMA user_version = 8");
+                        tx.Commit();
+                    }
+                }
+
+                if (version < 9)
+                {
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // 調達先の回答の状態（辞退・検討中）、見積の有効期限、失注の理由。
+                        Exec(conn, tx, "ALTER TABLE anken_supplier ADD COLUMN response_status TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE anken_supplier ADD COLUMN promised_date TEXT");
+                        Exec(conn, tx, "ALTER TABLE anken_supplier ADD COLUMN decline_reason TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE anken_supplier ADD COLUMN valid_until TEXT");
+                        Exec(conn, tx, "ALTER TABLE anken ADD COLUMN result_reason TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE removed_supplier ADD COLUMN response_status TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE removed_supplier ADD COLUMN promised_date TEXT");
+                        Exec(conn, tx, "ALTER TABLE removed_supplier ADD COLUMN decline_reason TEXT NOT NULL DEFAULT ''");
+                        Exec(conn, tx, "ALTER TABLE removed_supplier ADD COLUMN valid_until TEXT");
+                        Exec(conn, tx, "PRAGMA user_version = 9");
                         tx.Commit();
                     }
                 }

@@ -181,6 +181,36 @@ namespace AnkenDesk.OutlookAccess
             return result;
         }
 
+        public bool AddCategory(string entryId, string category)
+        {
+            dynamic? item = null;
+            try
+            {
+                item = _ns!.GetItemFromID(entryId);
+                var current = ((string)item.Categories) ?? "";
+                var names = current.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var n in names)
+                {
+                    if (string.Equals(n.Trim(), category, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true; // もう付いている
+                    }
+                }
+
+                item.Categories = current.Trim().Length == 0 ? category : current.Trim() + ", " + category;
+                item.Save();
+                return true;
+            }
+            catch (COMException)
+            {
+                return false; // 見つからない、読み取り専用のフォルダ、など
+            }
+            finally
+            {
+                Release(item);
+            }
+        }
+
         public string? GetConversationId(string entryId)
         {
             dynamic? item = null;

@@ -31,6 +31,33 @@ namespace AnkenDesk.Core
             }
         }
 
+        /// <summary>
+        /// 調達先の回答の状態を変える（辞退・検討中・通常）。検討中は回答予定日、辞退は理由（任意）。
+        /// 回答受領日が入っている調達先の状態は「回答済み」が優先される（ここでは変えるだけ）。
+        /// </summary>
+        public void SetSupplierResponse(long ankenId, long supplierId, string status, DateTime? promisedDate, string reason)
+        {
+            if (status != ResponseStatus.None && status != ResponseStatus.Considering && status != ResponseStatus.Declined)
+            {
+                throw new ArgumentException("知らない状態です: " + status);
+            }
+
+            using (var conn = Open())
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE anken_supplier SET response_status = $st, promised_date = $pd, decline_reason = $dr WHERE anken_id = $a AND supplier_id = $s";
+                cmd.Parameters.AddWithValue("$st", status);
+                cmd.Parameters.AddWithValue("$pd", status == ResponseStatus.Considering && promisedDate.HasValue ? (object)promisedDate.Value.ToString(DateFormat, CultureInfo.InvariantCulture) : DBNull.Value);
+                cmd.Parameters.AddWithValue("$dr", status == ResponseStatus.Declined ? (reason ?? "").Trim() : "");
+                cmd.Parameters.AddWithValue("$a", ankenId);
+                cmd.Parameters.AddWithValue("$s", supplierId);
+                if (cmd.ExecuteNonQuery() == 0)
+                {
+                    throw new InvalidOperationException("この案件に、その調達先が加えられていません。");
+                }
+            }
+        }
+
         public void SetAnkenStatus(long ankenId, string status)
         {
             if (!AnkenStatus.All.Contains(status))
@@ -137,11 +164,12 @@ namespace AnkenDesk.Core
             {
                 long ankenId, supplierId;
                 string? sent, recv;
-                string extra, relax, note, quotes, breakdowns;
+                string extra, relax, note, quotes, breakdowns, respStatus, declineReason;
+                string? promised, valid;
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = tx;
-                    cmd.CommandText = "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, breakdowns FROM removed_supplier WHERE id = $id";
+                    cmd.CommandText = "SELECT anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, quotes, breakdowns, response_status, promised_date, decline_reason, valid_until FROM removed_supplier WHERE id = $id";
                     cmd.Parameters.AddWithValue("$id", removedId);
                     using (var r = cmd.ExecuteReader())
                     {
@@ -159,6 +187,10 @@ namespace AnkenDesk.Core
                         note = r.GetString(6);
                         quotes = r.GetString(7);
                         breakdowns = r.GetString(8);
+                        respStatus = r.GetString(9);
+                        promised = r.IsDBNull(10) ? null : r.GetString(10);
+                        declineReason = r.GetString(11);
+                        valid = r.IsDBNull(12) ? null : r.GetString(12);
                     }
                 }
 
@@ -180,7 +212,12 @@ namespace AnkenDesk.Core
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = tx;
-                    cmd.CommandText = "INSERT INTO anken_supplier (anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note) VALUES ($a, $s, $sent, $recv, $e, $x, $n)";
+                    cmd.CommandText = "INSERT INTO anken_supplier (anken_id, supplier_id, sent_at, received_at, extra_cost, relaxation, note, response_status, promised_date, decline_reason, valid_until) "
+                        + "VALUES ($a, $s, $sent, $recv, $e, $x, $n, $rs, $pd, $dr, $vu)";
+                    cmd.Parameters.AddWithValue("$rs", respStatus);
+                    cmd.Parameters.AddWithValue("$pd", (object?)promised ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("$dr", declineReason);
+                    cmd.Parameters.AddWithValue("$vu", (object?)valid ?? DBNull.Value);
                     cmd.Parameters.AddWithValue("$a", ankenId);
                     cmd.Parameters.AddWithValue("$s", supplierId);
                     cmd.Parameters.AddWithValue("$sent", (object?)sent ?? DBNull.Value);

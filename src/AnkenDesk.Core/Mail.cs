@@ -23,6 +23,9 @@ namespace AnkenDesk.Core
     {
         /// <summary>宛先。複数のときは「;」で区切る。</summary>
         public string ToAddress { get; set; } = "";
+
+        /// <summary>CC（社内共有など）。複数のときは「;」で区切る。空なら付けない。</summary>
+        public string CcAddress { get; set; } = "";
         public string Subject { get; set; } = "";
 
         /// <summary>本文（テキスト）。</summary>
