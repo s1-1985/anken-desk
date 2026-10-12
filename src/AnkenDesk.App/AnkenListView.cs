@@ -23,9 +23,12 @@ namespace AnkenDesk.App
         private readonly Label _count = new Label();
         private IReadOnlyList<HomeRow> _rows = new List<HomeRow>();
 
-        public AnkenListView(AppServices services)
+        private readonly Action<long> _openAnken;
+
+        public AnkenListView(AppServices services, Action<long> openAnken)
         {
             _services = services;
+            _openAnken = openAnken;
             Dock = DockStyle.Fill;
             BackColor = UiStyle.Background;
             Font = new Font("BIZ UDPGothic", 11F);
@@ -160,12 +163,7 @@ namespace AnkenDesk.App
                 return;
             }
 
-            using (var dlg = new AnkenDetailForm(_services, r.Anken.Id))
-            {
-                dlg.ShowDialog(this);
-            }
-
-            Reload();
+            _openAnken(r.Anken.Id);
         }
 
         private void OpenFolder()
