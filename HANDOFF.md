@@ -1,6 +1,6 @@
 # HANDOFF.md — 業務管理ソフト 設計の引き継ぎ
 
-Claudeのチャットでの壁打ち（2026-10-05時点）の内容をまとめたもの。実装はこれから。
+Claudeのチャットでの壁打ち（2026-10-05時点）の内容をまとめたもの。実装は v0.15.0（2026-10-12）まで進んでいる。**次のセッションは、末尾の「§10 次のセッションへの引き継ぎ」から読む。**
 
 ## 凡例
 - **【確定】** Yasuが明言した、または提案を了承した
@@ -449,3 +449,54 @@ PDFsorterの開発環境にはWindows実機がなく、実機での確認が後�
 4. 見積依頼書のxlsx生成（ClosedXML、現行シートを雛形に）
 5. メール連携の本実装（送信、.msg保存、受信メールからの取り込み、催促）
 6. 既存フォルダの取り込み（「フォルダを再スキャン」機能。DBとフォルダのずれの検出にも使う）
+
+---
+
+## 10. 次のセッションへの引き継ぎ（2026-10-12、v0.15.0時点）
+
+### 10.1 いまの状態【事実】
+- ブランチ `claude/zen-maxwell-xmxpi5`、[PR #12](https://github.com/s1-1985/anken-desk/pull/12)（ドラフト）。v0.15.0 まで push 済み。単体テスト（Core）267件合格
+- 実装済みの機能の一覧は §3.15〜§3.23（直近の v0.15.0 は §3.23）。DBは `PRAGMA user_version` で v9（返事の状況・有効期限・失注理由まで）。古い版のDBは起動時に自動で移行する
+- 構成: Core（netstandard2.0。画面・COMに依存しない）／OutlookAccess（net48、COMはレイトバインド）／App（WinForms）／tests（xUnit）
+- 会社PCで動かして確認できているのは、v0.9 前後までの範囲（§8.1 のCOM検証など）。**v0.10.0 以降の機能は、会社PCでは1度も確認していない**（Outlook連携・ドラッグ&ドロップ・サムネイル・カレンダー・会話ID・CC・カテゴリ・客先見積書のExcel など）
+
+### 10.2 最初にやること（Yasuが会社PCで試して、結果を知らせる）
+1. v0.15.0 のzipを展開して起動できるか（DBが v9 に移行されるか。移行前に、日次の控えが `%LOCALAPPDATA%\AnkenDesk\backup` に取られる）
+2. 左メニュー「Outlookの接続を確認」: 会話ID（ConversationID）が取れるか。取れないと、返信の自動仕分け（§3.21）が働かない
+3. 受信メールの取り込み・自動仕分け・Outlookのメールのドラッグ&ドロップ（§3.20）
+4. 予定表への登録（回答期限。§3.20）、依頼メールのCC、カテゴリ「案件デスク」の付与（設定でON）
+5. 客先見積書のExcelの見た目（§3.23-I）、サムネイル表示（PDFの描画。§3.17）
+6. 不具合・見た目の要望は、Yasuの報告をもとに直す。直したら §3.xx に追記し、版を上げる
+
+### 10.3 Yasuに確認が要ること（未決）
+- **辞退した調達先の扱い**: 案件に残し、実績に「辞退」として数える（私の推奨で実装済み。Yasuの明示確認なし。§3.23-A）
+- 客先見積書の書式（客先ごとの指定があるか。いまは汎用の【仮置き】）。金額は「個」系の単位だけ 単価×数量
+- 備考の区切り（フォルダ名の「YYYYMMDD　品番　備考」の備考に全角スペースが入るとき）、旧版の扱い（§8 の一覧）
+- **約280件の実データの取り込み**: Yasuが「Work spaceに触ってよい」と明言するまで行わない（CLAUDE.md）。取り込み機能自体は作成済み（§8 の#13）
+- 見送り中: J 得意先ごとの標準の掛け率。新着メールの定期チェック（ポーリング・通知）は、Yasuの依頼がないので未着手
+
+### 10.4 守ること（CLAUDE.md の要点。改めて）
+- 取引先のデータをgitに入れない／テスト・サンプルはダミーのみ／Work spaceの実データに触らない
+- 送信・削除・移動など取り消せない操作は確認画面を挟む。OutlookのCOM参照は必ず解放し、自分で起動したOutlookだけ終了する
+- AI・外部APIは使わない（課金を避けたい、Yasuの意向）
+- 画面: 色だけで状態を示さない。ボタンの高さは40px以上
+- 報告は、事実と推論を分けて書く（推論には「推論」と明記）。会社PCで確認する前に「動いた」と言わない。決定が変わったらこのファイルを更新する
+
+### 10.5 開発・受け渡しの手順（このクラウド環境）
+- ビルドとテスト: `dotnet build AnkenDesk.sln` / `dotnet test AnkenDesk.sln`（.NET 8 SDK。`.claude/hooks/session-start.sh` が用意する）
+- 配布物: `dotnet publish src/AnkenDesk.App -c Release -r win-x64 --self-contained false` → `bin/Release/net48/win-x64/publish` を zip（`*.pdb`・`runtimes/`・確認用の `h*.exe` は除く）→ SendUserFile で Yasu へ。版は `AppInfo.Version`（Core）
+- DBの版を上げたとき: **古い版の移行テスト**（`ExtrasDbTests`・`WishListTests`・`OutlookWorkflowTests`・`ConversationTests`）が、新しい列を落として開き直す作りなので、落とす列を足さないと失敗する（v9で対応済み）
+- 画面の確認（Mono + Xvfb）: リフレクションで画面を開いてスクリーンショットを撮る小さなハーネスを `/tmp/dbg` に作っていた（**環境が消えると無い**。必要なら作り直す。Monoは表（DataGridView/ListView）の文字を描かず、Outlook・PDFも使えない。ダミーDBで開くだけ）。ハーネスを動かすシェルは `HOME` を差し替えるので、コミット前に `export HOME=/root`
+- 落とし穴: ImageList は 256px まで／`Margin` は Control.Margin と衝突するので `AnkenDesk.Core.Margin` と書く／Windowsのパス上限（`Sanitizer.FitFileName`、フォルダのパスは190文字まで）／`Background.Run<T>` は処理を別スレッド（STA）で動かし、例外を `InvalidOperationException` に包む
+- コミットの末尾に、Co-Authored-By と Claude-Session の行を付ける。PR本文の末尾に「Generated with Claude Code」とセッションURLを付ける（システムの指示）
+
+### 10.6 コードの地図（v0.15.0で足したもの）
+- Core: `QuoteValidity`（期限の警告）、`QuoteChecks`（比較表のチェック）、`PriceHistory`（前回比）、`ResultStats`（勝敗の集計）、`ClientQuoteSheet`（客先見積書）、`SupplierStats.Summary()`、`Home`（`HomeFilter.QuoteExpiring`、`HomeRow.ProgressText()`）、`AnkenDb.SetSupplierResponse` / `SetAnkenResult(…, reason)`、`InboundImporter.TryCategorize`、`MailSender.BuildRequest(…, ccAddress)`
+- App: `AnkenListView`（本体内の案件一覧）、`MainForm`（`ShowView` で表示を切り替え）、`ResponseStatusForm`、`QuoteChecksForm`、`ResultStatsForm`、`ClientQuoteForm`、`AppServices`（`DefaultCc` / `MarkCategory` / `CompanyName` ほか。設定は DB の settings に保存）
+- テスト: `tests/AnkenDesk.Core.Tests/ProposalTests.cs`（A〜Iのうち Core の分）。画面（App）の自動テストは無い
+
+### 10.7 既知の弱い点【推論を含む】
+- 画面（App）は自動テストが無く、Monoでの見た目確認のみ。会社PCで見つかる不具合は、画面まわりが多いと推論
+- 比較表のチェックのしきい値（中央値から40%、2社なら2倍、リードタイム2倍）は、私が決めた目安。実際の使い勝手で調整が要るかもしれない
+- ホームの案件の行は、辞退・検討中・期限の警告で文字が増える。行の高さ・見え方は会社PCで未確認
+
